@@ -22,6 +22,7 @@ String g_latestVersion = "";
 bool g_updateAvailable = false;
 bool g_busy = false;
 bool g_checkNowRequested = false;
+bool g_installNowRequested = false;
 uint32_t g_nextAutoCheckMs = 0;
 
 struct SemVersion {
@@ -386,6 +387,7 @@ void otaUpdateBegin() {
   g_updateAvailable = false;
   g_busy = false;
   g_checkNowRequested = false;
+  g_installNowRequested = false;
   g_nextAutoCheckMs = millis() + 20000;
 }
 
@@ -398,20 +400,36 @@ void otaUpdateProcessTick(uint32_t nowMs, bool staConnected, bool internetConnec
     return;
   }
 
+  const bool installNow = g_installNowRequested;
   const bool autoDue = autoEnabled && static_cast<int32_t>(nowMs - g_nextAutoCheckMs) >= 0;
-  if (!g_checkNowRequested && !autoDue) {
+  const bool checkNow = g_checkNowRequested;
+  if (!installNow && !checkNow && !autoDue) {
     return;
   }
 
   g_busy = true;
   g_checkNowRequested = false;
+  g_installNowRequested = false;
   g_nextAutoCheckMs = nowMs + OTA_CHECK_INTERVAL_MS;
-  runCheckAndMaybeUpdate(autoEnabled);
+
+  if (installNow) {
+    runCheckAndMaybeUpdate(true);
+  } else if (checkNow) {
+    // Manual check should only detect update availability.
+    runCheckAndMaybeUpdate(false);
+  } else {
+    runCheckAndMaybeUpdate(true);
+  }
+
   g_busy = false;
 }
 
 void otaUpdateRequestCheckNow() {
   g_checkNowRequested = true;
+}
+
+void otaUpdateRequestInstallNow() {
+  g_installNowRequested = true;
 }
 
 String otaUpdateGetCurrentVersion() {

@@ -149,6 +149,7 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
       <div class="row">
         <button onclick="saveSettings()">Save Settings</button>
         <button class="alt" onclick="checkOtaNow()">Check OTA Now</button>
+        <button onclick="installOtaNow()">Install Update Now</button>
         <a class="btn alt" id="backBtn" href="/">Back</a>
       </div>
 
@@ -198,6 +199,13 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
     async function checkOtaNow() {
       const msg = document.getElementById('msg');
       const res = await fetch('/api/ota/check', { method: 'POST' });
+      msg.textContent = await res.text();
+      fetchStatus();
+    }
+
+    async function installOtaNow() {
+      const msg = document.getElementById('msg');
+      const res = await fetch('/api/ota/install', { method: 'POST' });
       msg.textContent = await res.text();
       fetchStatus();
     }

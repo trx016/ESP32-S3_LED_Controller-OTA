@@ -5,6 +5,7 @@
 void otaUpdateBegin();
 void otaUpdateProcessTick(uint32_t nowMs, bool staConnected, bool internetConnected, bool autoEnabled);
 void otaUpdateRequestCheckNow();
+void otaUpdateRequestInstallNow();
 
 String otaUpdateGetCurrentVersion();
 String otaUpdateGetLatestVersion();

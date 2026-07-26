@@ -107,6 +107,11 @@ void handleOtaCheckNow() {
   g_server->send(202, "text/plain", "OTA check requested.");
 }
 
+void handleOtaInstallNow() {
+  otaUpdateRequestInstallNow();
+  g_server->send(202, "text/plain", "OTA install requested.");
+}
+
 void handleRestart() {
   g_server->send(200, "text/plain", "Restarting device...");
   delay(300);
@@ -135,6 +140,7 @@ void setupWebRoutes(WebServer &server) {
   server.on("/api/device", HTTP_POST, handleDeviceNameSave);
   server.on("/api/settings/ota", HTTP_POST, handleOtaSettingSave);
   server.on("/api/ota/check", HTTP_POST, handleOtaCheckNow);
+  server.on("/api/ota/install", HTTP_POST, handleOtaInstallNow);
   server.on("/api/restart", HTTP_POST, handleRestart);
 
   server.onNotFound([]() { sendPortalRedirect(isSetupStage() ? "/setup" : "/"); });
