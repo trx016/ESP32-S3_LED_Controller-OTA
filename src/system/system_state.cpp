@@ -6,6 +6,7 @@
 #include <WiFiClient.h>
 
 #include "ota_update.h"
+#include "serial_debug.h"
 #include "statusLED_functions.h"
 
 #ifndef LED_STRIP_LENGTH
@@ -39,6 +40,39 @@ uint32_t nextInternetProbeMs = 0;
 uint32_t wifiConnectedBreathUntilMs = 0;
 uint32_t nextWifiRetryMs = 0;
 uint32_t apGraceUntilMs = 0;
+
+bool lastLoggedApEnabled = false;
+bool lastLoggedStaConnected = false;
+bool lastLoggedInternetConnected = false;
+String lastLoggedStaIp;
+String lastLoggedApIp;
+
+void debugLogNetworkSnapshotIfChanged(const char *reason) {
+  const bool staNow = WiFi.status() == WL_CONNECTED;
+  const bool apNow = apEnabled;
+  const bool internetNow = internetConnected;
+  const String staIpNow = staNow ? WiFi.localIP().toString() : String("-");
+  const String apIpNow = apNow ? WiFi.softAPIP().toString() : String("-");
+
+  const bool changed =
+      staNow != lastLoggedStaConnected ||
+      apNow != lastLoggedApEnabled ||
+      internetNow != lastLoggedInternetConnected ||
+      staIpNow != lastLoggedStaIp ||
+      apIpNow != lastLoggedApIp;
+
+  if (!changed) {
+    return;
+  }
+
+  lastLoggedStaConnected = staNow;
+  lastLoggedApEnabled = apNow;
+  lastLoggedInternetConnected = internetNow;
+  lastLoggedStaIp = staIpNow;
+  lastLoggedApIp = apIpNow;
+
+  serialDebugPrintNetworkSnapshot(reason);
+}
 
 bool isConnectionBreathWindowActive(uint32_t nowMs) {
   return static_cast<int32_t>(wifiConnectedBreathUntilMs - nowMs) > 0;
@@ -270,12 +304,18 @@ void systemStateBegin() {
   nextInternetProbeMs = 0;
   nextWifiRetryMs = 0;
   apGraceUntilMs = 0;
+  lastLoggedApEnabled = false;
+  lastLoggedStaConnected = false;
+  lastLoggedInternetConnected = false;
+  lastLoggedStaIp = "";
+  lastLoggedApIp = "";
 }
 
 void systemStateStartAccessPoint(DNSServer &dnsServer) {
   dnsServerRef = &dnsServer;
   apSsid = buildApSsid();
   enableAccessPoint();
+  debugLogNetworkSnapshotIfChanged("access point start");
 }
 
 bool systemStateConnectToSavedWifi(uint32_t timeoutMs) {
@@ -306,6 +346,8 @@ bool systemStateConnectToSavedWifi(uint32_t timeoutMs) {
     scheduleNextWifiRetry(nowMs);
   }
 
+  debugLogNetworkSnapshotIfChanged("initial wifi connect attempt");
+
   return staConnected;
 }
 
@@ -323,6 +365,7 @@ void systemStateProcessConnectivityTick(uint32_t nowMs) {
 
     updateStatusLedMode();
     nextInternetProbeMs = nowMs + 10000;
+    debugLogNetworkSnapshotIfChanged("connectivity tick");
     return;
   }
 
@@ -338,6 +381,7 @@ void systemStateProcessConnectivityTick(uint32_t nowMs) {
   }
 
   updateStatusLedMode();
+  debugLogNetworkSnapshotIfChanged("connectivity tick");
 }
 
 void systemStateSetError(bool hasError) {
@@ -418,6 +462,7 @@ void systemStateSetInternetEnabled(bool enabled) {
     internetConnected = false;
   }
   updateStatusLedMode();
+  serialDebugPrintNetworkSnapshot(enabled ? "internet enabled" : "internet disabled");
 }
 
 bool systemStateIsInternetEnabled() {
@@ -491,6 +536,7 @@ void systemStateApplyWifiCredentials(const String &ssid, const String &pass, uin
 
   internetConnected = false;
   updateStatusLedMode();
+  serialDebugPrintNetworkSnapshot("wifi credentials applied");
 }
 
 void systemStateClearWifiCredentials() {
@@ -517,6 +563,7 @@ void systemStateClearWifiCredentials() {
   delay(120);
   enableAccessPoint();
   updateStatusLedMode();
+  serialDebugPrintNetworkSnapshot("wifi credentials cleared");
 }
 
 String systemStateGetApSsid() {

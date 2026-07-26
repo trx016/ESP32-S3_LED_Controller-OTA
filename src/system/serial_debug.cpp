@@ -15,6 +15,8 @@ void serialDebugPrintCommandHelp() {
   Serial.println("  help       - show this help");
   Serial.println("  commands   - show this help");
   Serial.println("  ?          - show this help");
+  Serial.println("  net        - print current network snapshot");
+  Serial.println("  status     - print current network snapshot");
   Serial.println("  clearwifi  - clear saved Wi-Fi credentials");
   Serial.println("  otacheck   - trigger immediate OTA check");
 }
@@ -29,6 +31,11 @@ void serialDebugHandleCommand(String cmd) {
 
   if (cmd == "help" || cmd == "commands" || cmd == "?") {
     serialDebugPrintCommandHelp();
+    return;
+  }
+
+  if (cmd == "net" || cmd == "status") {
+    serialDebugPrintNetworkSnapshot("manual command");
     return;
   }
 
@@ -82,6 +89,44 @@ void serialDebugPrintNetworkStartup(const String &apSsid, bool staConnected, boo
 
 void serialDebugPrintTaskStartup() {
   Serial.println("Tasks started: webTask on Core 0, ledTask on Core 1");
+}
+
+void serialDebugPrintNetworkSnapshot(const char *reason) {
+  const bool staConnected = systemStateIsStaConnected();
+  const bool apEnabled = systemStateIsApEnabled();
+  const bool hasInternet = systemStateHasInternet();
+
+  String mode = "STA_RETRY";
+  if (staConnected && apEnabled) {
+    mode = "AP+STA";
+  } else if (staConnected && !apEnabled) {
+    mode = "STA_ONLY";
+  } else if (!staConnected && apEnabled) {
+    mode = "AP_ONLY";
+  }
+
+  Serial.println();
+  Serial.println("[network]");
+  Serial.print("reason: ");
+  Serial.println(reason != nullptr ? reason : "unspecified");
+  Serial.print("mode: ");
+  Serial.println(mode);
+  Serial.print("saved ssid: ");
+  Serial.println(systemStateGetSavedSsid().isEmpty() ? "(none)" : systemStateGetSavedSsid());
+  Serial.print("ap enabled: ");
+  Serial.println(apEnabled ? "yes" : "no");
+  Serial.print("ap ssid: ");
+  Serial.println(systemStateGetApSsid());
+  Serial.print("ap ip: ");
+  Serial.println(WiFi.softAPIP());
+  Serial.print("sta connected: ");
+  Serial.println(staConnected ? "yes" : "no");
+  Serial.print("sta ip: ");
+  Serial.println(staConnected ? WiFi.localIP().toString() : String("-"));
+  Serial.print("internet: ");
+  Serial.println(hasInternet ? "yes" : "no");
+  Serial.print("ota status: ");
+  Serial.println(otaUpdateGetLastStatus());
 }
 
 void serialDebugPollCommands() {
