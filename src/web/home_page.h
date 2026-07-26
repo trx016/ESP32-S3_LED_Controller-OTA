@@ -141,6 +141,7 @@ const char HOME_PAGE_HTML[] PROGMEM = R"HTML(
     <section class="card">
       <div class="row">
         <a class="btn" href="/setup">Open Wi-Fi Setup</a>
+        <a class="btn" href="/effects">Effects</a>
         <a class="btn subtle" href="/settings">Settings</a>
         <button class="subtle" onclick="reboot()">Restart Device</button>
       </div>

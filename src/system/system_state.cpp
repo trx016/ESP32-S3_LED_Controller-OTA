@@ -8,6 +8,10 @@
 #include "ota_update.h"
 #include "statusLED_functions.h"
 
+#ifndef LED_STRIP_LENGTH
+#define LED_STRIP_LENGTH 1600
+#endif
+
 namespace {
 
 static const char *AP_SSID_PREFIX = "LED-Controller-Setup";
@@ -29,6 +33,7 @@ bool lastStaConnected = false;
 bool mdnsStarted = false;
 bool autoOtaEnabled = false;
 bool internetEnabled = true;
+uint16_t ledCount = LED_STRIP_LENGTH;
 
 uint32_t nextInternetProbeMs = 0;
 uint32_t wifiConnectedBreathUntilMs = 0;
@@ -140,6 +145,8 @@ void loadSettings() {
   preferences.begin("settings", true);
   autoOtaEnabled = preferences.getBool("auto_ota", false);
   internetEnabled = preferences.getBool("internet_enabled", true);
+  const uint32_t storedLedCount = preferences.getUInt("led_count", LED_STRIP_LENGTH);
+  ledCount = static_cast<uint16_t>(constrain(storedLedCount, 1U, static_cast<uint32_t>(LED_STRIP_LENGTH)));
   preferences.end();
 }
 
@@ -368,6 +375,8 @@ String systemStateStatusJson() {
   json += "\"ssid\":\"" + savedSsid + "\",";
   json += "\"auto_ota\":" + String(autoOtaEnabled ? "true" : "false") + ",";
   json += "\"internet_enabled\":" + String(internetEnabled ? "true" : "false") + ",";
+  json += "\"led_count\":" + String(ledCount) + ",";
+  json += "\"led_count_max\":" + String(LED_STRIP_LENGTH) + ",";
   json += "\"ota_busy\":" + String(otaUpdateIsBusy() ? "true" : "false") + ",";
   json += "\"ota_update_available\":" + String(otaUpdateIsUpdateAvailable() ? "true" : "false") + ",";
   json += "\"ota_current\":\"" + otaUpdateGetCurrentVersion() + "\",";
@@ -413,6 +422,27 @@ void systemStateSetInternetEnabled(bool enabled) {
 
 bool systemStateIsInternetEnabled() {
   return internetEnabled;
+}
+
+void systemStateSetLedCount(uint16_t count) {
+  const uint16_t clamped = static_cast<uint16_t>(constrain(count, static_cast<uint16_t>(1), static_cast<uint16_t>(LED_STRIP_LENGTH)));
+  if (ledCount == clamped) {
+    return;
+  }
+
+  preferences.begin("settings", false);
+  preferences.putUInt("led_count", clamped);
+  preferences.end();
+
+  ledCount = clamped;
+}
+
+uint16_t systemStateGetLedCount() {
+  return ledCount;
+}
+
+uint16_t systemStateGetLedCountMax() {
+  return LED_STRIP_LENGTH;
 }
 
 void systemStateSaveWifiCredentials(const String &ssid, const String &pass) {

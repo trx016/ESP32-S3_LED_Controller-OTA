@@ -114,6 +114,14 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
       font-weight: 700;
       color: #0f766e;
     }
+    .numberInput {
+      width: 140px;
+      border-radius: 8px;
+      border: 1px solid rgba(28, 46, 40, 0.25);
+      padding: 8px;
+      font: inherit;
+      font-weight: 700;
+    }
     .meta {
       margin-top: 12px;
       display: grid;
@@ -146,6 +154,14 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
           <div class="hint">Disable this to keep the device on local-only operation (no internet probes or OTA checks).</div>
         </div>
         <input class="toggle" id="internetEnabled" type="checkbox" />
+      </div>
+
+      <div class="switchRow">
+        <div>
+          <div class="switchLabel">Active LED Count</div>
+          <div class="hint">Set how many LEDs are actively rendered by all effects.</div>
+        </div>
+        <input class="numberInput" id="ledCount" type="number" min="1" step="1" />
       </div>
 
       <div class="meta">
@@ -182,6 +198,8 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
       setWifiPill(latestConnected);
       document.getElementById('autoOta').checked = !!s.auto_ota;
       document.getElementById('internetEnabled').checked = (s.internet_enabled !== false);
+      document.getElementById('ledCount').value = String(s.led_count || 1);
+      document.getElementById('ledCount').max = String(s.led_count_max || 1);
       document.getElementById('otaCurrent').textContent = s.ota_current || '-';
       document.getElementById('otaLatest').textContent = s.ota_latest || '-';
       document.getElementById('otaStatus').textContent = s.ota_status || '-';
@@ -195,6 +213,7 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
     async function saveSettings() {
       const otaEnabled = document.getElementById('autoOta').checked ? '1' : '0';
       const internetEnabled = document.getElementById('internetEnabled').checked ? '1' : '0';
+      const ledCount = document.getElementById('ledCount').value || '1';
 
       const otaRes = await fetch('/api/settings/ota', {
         method: 'POST',
@@ -208,12 +227,19 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
         body: new URLSearchParams({ enabled: internetEnabled })
       });
 
+      const ledRes = await fetch('/api/settings/leds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ count: ledCount })
+      });
+
       const otaText = await otaRes.text();
       const internetText = await internetRes.text();
+      const ledText = await ledRes.text();
       const msg = document.getElementById('msg');
-      msg.textContent = `${otaText} ${internetText}`;
+      msg.textContent = `${otaText} ${internetText} ${ledText}`;
 
-      if (otaRes.ok && internetRes.ok) {
+      if (otaRes.ok && internetRes.ok && ledRes.ok) {
         setWifiPill(latestConnected);
       }
 

@@ -2,6 +2,7 @@
 #include <DNSServer.h>
 #include <WebServer.h>
 
+#include "led/effects_engine.h"
 #include "statusLED_functions.h"
 #include "system/ota_update.h"
 #include "system/runtime_tasks.h"
@@ -27,6 +28,8 @@ void setup() {
   statusLedBegin(LED_PIN);
 
   systemStateBegin();
+  effectsEngineBegin();
+  effectsEngineSetActiveLedCount(systemStateGetLedCount());
   otaUpdateBegin();
   systemStateStartAccessPoint(dnsServer);
   const bool connected = systemStateConnectToSavedWifi();

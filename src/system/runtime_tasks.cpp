@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "../led/effects_engine.h"
 #include "ota_update.h"
 #include "statusLED_functions.h"
 #include "system_state.h"
@@ -36,6 +37,7 @@ void ledTask(void *parameter) {
   (void)parameter;
 
   for (;;) {
+    effectsEngineTick();
     statusLedTick();
     vTaskDelay(pdMS_TO_TICKS(1));
   }
