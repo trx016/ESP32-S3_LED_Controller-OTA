@@ -28,6 +28,7 @@ bool systemError = false;
 bool lastStaConnected = false;
 bool mdnsStarted = false;
 bool autoOtaEnabled = false;
+bool internetEnabled = true;
 
 uint32_t nextInternetProbeMs = 0;
 uint32_t wifiConnectedBreathUntilMs = 0;
@@ -138,6 +139,7 @@ void loadWifiCredentials() {
 void loadSettings() {
   preferences.begin("settings", true);
   autoOtaEnabled = preferences.getBool("auto_ota", false);
+  internetEnabled = preferences.getBool("internet_enabled", true);
   preferences.end();
 }
 
@@ -233,6 +235,8 @@ void updateStatusLedMode() {
     statusLedSetMode(StatusLedMode::NoWifiBlinkBlueRed);
   } else if (isConnectionBreathWindowActive(nowMs)) {
     statusLedSetMode(StatusLedMode::WifiConnectedBreathGreen);
+  } else if (!internetEnabled) {
+    statusLedSetMode(StatusLedMode::NormalOff);
   } else if (internetConnected && !autoOtaEnabled && otaUpdateIsUpdateAvailable()) {
     statusLedSetMode(StatusLedMode::OtaUpdateAvailableBreathPurple);
   } else if (!internetConnected) {
@@ -245,7 +249,7 @@ void updateStatusLedMode() {
 void refreshConnectivityNow() {
   staConnected = WiFi.status() == WL_CONNECTED;
   updateConnectionCelebrationWindow();
-  internetConnected = hasInternetAccess();
+  internetConnected = internetEnabled && hasInternetAccess();
   updateStatusLedMode();
 }
 
@@ -322,7 +326,7 @@ void systemStateProcessConnectivityTick(uint32_t nowMs) {
   }
 
   if (nowMs >= nextInternetProbeMs) {
-    internetConnected = hasInternetAccess();
+    internetConnected = internetEnabled && hasInternetAccess();
     nextInternetProbeMs = nowMs + 10000;
   }
 
@@ -363,6 +367,7 @@ String systemStateStatusJson() {
   json += "\"lan_url\":\"" + lanUrl + "\",";
   json += "\"ssid\":\"" + savedSsid + "\",";
   json += "\"auto_ota\":" + String(autoOtaEnabled ? "true" : "false") + ",";
+  json += "\"internet_enabled\":" + String(internetEnabled ? "true" : "false") + ",";
   json += "\"ota_busy\":" + String(otaUpdateIsBusy() ? "true" : "false") + ",";
   json += "\"ota_update_available\":" + String(otaUpdateIsUpdateAvailable() ? "true" : "false") + ",";
   json += "\"ota_current\":\"" + otaUpdateGetCurrentVersion() + "\",";
@@ -388,6 +393,26 @@ void systemStateSetAutoOtaEnabled(bool enabled) {
 
 bool systemStateIsAutoOtaEnabled() {
   return autoOtaEnabled;
+}
+
+void systemStateSetInternetEnabled(bool enabled) {
+  if (internetEnabled == enabled) {
+    return;
+  }
+
+  preferences.begin("settings", false);
+  preferences.putBool("internet_enabled", enabled);
+  preferences.end();
+
+  internetEnabled = enabled;
+  if (!internetEnabled) {
+    internetConnected = false;
+  }
+  updateStatusLedMode();
+}
+
+bool systemStateIsInternetEnabled() {
+  return internetEnabled;
 }
 
 void systemStateSaveWifiCredentials(const String &ssid, const String &pass) {

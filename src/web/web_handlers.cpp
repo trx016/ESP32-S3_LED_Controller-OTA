@@ -102,6 +102,19 @@ void handleOtaSettingSave() {
   g_server->send(200, "text/plain", enabled ? "Automatic OTA updates enabled." : "Automatic OTA updates disabled.");
 }
 
+void handleInternetSettingSave() {
+  if (!g_server->hasArg("enabled")) {
+    g_server->send(400, "text/plain", "Missing enabled value");
+    return;
+  }
+
+  const String enabledArg = g_server->arg("enabled");
+  const bool enabled = enabledArg == "1" || enabledArg == "true" || enabledArg == "on";
+
+  systemStateSetInternetEnabled(enabled);
+  g_server->send(200, "text/plain", enabled ? "Internet connectivity enabled." : "Internet connectivity disabled.");
+}
+
 void handleOtaCheckNow() {
   otaUpdateRequestCheckNow();
   g_server->send(202, "text/plain", "OTA check requested.");
@@ -139,6 +152,7 @@ void setupWebRoutes(WebServer &server) {
   server.on("/api/wifi/clear", HTTP_POST, handleWifiClear);
   server.on("/api/device", HTTP_POST, handleDeviceNameSave);
   server.on("/api/settings/ota", HTTP_POST, handleOtaSettingSave);
+  server.on("/api/settings/internet", HTTP_POST, handleInternetSettingSave);
   server.on("/api/ota/check", HTTP_POST, handleOtaCheckNow);
   server.on("/api/ota/install", HTTP_POST, handleOtaInstallNow);
   server.on("/api/restart", HTTP_POST, handleRestart);

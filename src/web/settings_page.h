@@ -140,6 +140,14 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
         <input class="toggle" id="autoOta" type="checkbox" />
       </div>
 
+      <div class="switchRow">
+        <div>
+          <div class="switchLabel">Enable Internet Connectivity</div>
+          <div class="hint">Disable this to keep the device on local-only operation (no internet probes or OTA checks).</div>
+        </div>
+        <input class="toggle" id="internetEnabled" type="checkbox" />
+      </div>
+
       <div class="meta">
         <div>Current firmware: <strong id="otaCurrent">-</strong></div>
         <div>Latest release: <strong id="otaLatest">-</strong></div>
@@ -173,6 +181,7 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
       latestConnected = !!s.connected;
       setWifiPill(latestConnected);
       document.getElementById('autoOta').checked = !!s.auto_ota;
+      document.getElementById('internetEnabled').checked = (s.internet_enabled !== false);
       document.getElementById('otaCurrent').textContent = s.ota_current || '-';
       document.getElementById('otaLatest').textContent = s.ota_latest || '-';
       document.getElementById('otaStatus').textContent = s.ota_status || '-';
@@ -184,21 +193,31 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
     }
 
     async function saveSettings() {
-      const enabled = document.getElementById('autoOta').checked ? '1' : '0';
-      const body = new URLSearchParams({ enabled });
-      const res = await fetch('/api/settings/ota', {
+      const otaEnabled = document.getElementById('autoOta').checked ? '1' : '0';
+      const internetEnabled = document.getElementById('internetEnabled').checked ? '1' : '0';
+
+      const otaRes = await fetch('/api/settings/ota', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body
+        body: new URLSearchParams({ enabled: otaEnabled })
       });
 
-      const text = await res.text();
-      const msg = document.getElementById('msg');
-      msg.textContent = text;
+      const internetRes = await fetch('/api/settings/internet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ enabled: internetEnabled })
+      });
 
-      if (res.ok) {
+      const otaText = await otaRes.text();
+      const internetText = await internetRes.text();
+      const msg = document.getElementById('msg');
+      msg.textContent = `${otaText} ${internetText}`;
+
+      if (otaRes.ok && internetRes.ok) {
         setWifiPill(latestConnected);
       }
+
+      fetchStatus();
     }
 
     async function checkOtaNow() {
@@ -209,6 +228,12 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
     }
 
     async function installOtaNow() {
+      const latest = document.getElementById('otaLatest').textContent || 'new release';
+      const ok = confirm(`Install firmware update ${latest}? Device will reboot after successful update.`);
+      if (!ok) {
+        return;
+      }
+
       const msg = document.getElementById('msg');
       const res = await fetch('/api/ota/install', { method: 'POST' });
       msg.textContent = await res.text();

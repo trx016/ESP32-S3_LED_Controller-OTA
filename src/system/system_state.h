@@ -14,6 +14,8 @@ void systemStateSetError(bool hasError);
 String systemStateStatusJson();
 void systemStateSetAutoOtaEnabled(bool enabled);
 bool systemStateIsAutoOtaEnabled();
+void systemStateSetInternetEnabled(bool enabled);
+bool systemStateIsInternetEnabled();
 void systemStateSetDeviceName(const String &name);
 void systemStateSaveWifiCredentials(const String &ssid, const String &pass);
 void systemStateApplyWifiCredentials(const String &ssid, const String &pass, uint32_t apGraceMs = 30000);
