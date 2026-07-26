@@ -22,7 +22,9 @@ void webTask(void *parameter) {
     const uint32_t nowMs = millis();
 
     systemStateProcessConnectivityTick(nowMs);
+#if !defined(DEBUG_DISABLE_OTA_RUNTIME) || (DEBUG_DISABLE_OTA_RUNTIME == 0)
     otaUpdateProcessTick(nowMs, systemStateIsStaConnected(), systemStateHasInternet(), systemStateIsAutoOtaEnabled());
+#endif
 
     if (systemStateIsApEnabled()) {
       g_dnsServer->processNextRequest();
@@ -37,7 +39,11 @@ void ledTask(void *parameter) {
   (void)parameter;
 
   for (;;) {
+#if !defined(DEBUG_DISABLE_EFFECTS_TICK) || (DEBUG_DISABLE_EFFECTS_TICK == 0)
+#if !defined(DEBUG_EFFECTS_RUN_ON_MAIN_LOOP) || (DEBUG_EFFECTS_RUN_ON_MAIN_LOOP == 0)
     effectsEngineTick();
+#endif
+#endif
     statusLedTick();
     vTaskDelay(pdMS_TO_TICKS(1));
   }

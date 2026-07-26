@@ -46,6 +46,11 @@ void handleEffectsPage() {
     return;
   }
 
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "text/plain", "Effects runtime temporarily disabled for crash isolation.");
+  return;
+#endif
+
   g_server->send_P(200, "text/html", EFFECTS_PAGE_HTML);
 }
 
@@ -136,17 +141,29 @@ void handleLedCountSave() {
   const uint16_t clamped = static_cast<uint16_t>(constrain(requested, 1, static_cast<int>(systemStateGetLedCountMax())));
 
   systemStateSetLedCount(clamped);
+#if !defined(DEBUG_DISABLE_EFFECTS_INIT) || (DEBUG_DISABLE_EFFECTS_INIT == 0)
   effectsEngineSetActiveLedCount(clamped);
+#endif
 
   g_server->send(200, "text/plain", "Active LED count updated.");
 }
 
 void handleOtaCheckNow() {
+#if defined(DEBUG_DISABLE_OTA_RUNTIME) && (DEBUG_DISABLE_OTA_RUNTIME == 1)
+  g_server->send(503, "text/plain", "OTA runtime temporarily disabled for crash isolation.");
+  return;
+#endif
+
   otaUpdateRequestCheckNow();
   g_server->send(202, "text/plain", "OTA check requested.");
 }
 
 void handleOtaInstallNow() {
+#if defined(DEBUG_DISABLE_OTA_RUNTIME) && (DEBUG_DISABLE_OTA_RUNTIME == 1)
+  g_server->send(503, "text/plain", "OTA runtime temporarily disabled for crash isolation.");
+  return;
+#endif
+
   otaUpdateRequestInstallNow();
   g_server->send(202, "text/plain", "OTA install requested.");
 }
@@ -171,14 +188,29 @@ uint8_t parseU8Arg(const char *name, uint8_t current) {
 }
 
 void handleEffectsState() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "application/json", "{\"error\":\"effects_disabled\"}");
+  return;
+#endif
+
   g_server->send(200, "application/json", effectsEngineStateJson());
 }
 
 void handleEffectsCatalog() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "application/json", "[]");
+  return;
+#endif
+
   g_server->send(200, "application/json", effectsEngineCatalogJson());
 }
 
 void handleEffectsSet() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "text/plain", "Effects runtime temporarily disabled for crash isolation.");
+  return;
+#endif
+
   const LedEffectState current = effectsEngineGetState();
 
   if (g_server->hasArg("pattern")) {

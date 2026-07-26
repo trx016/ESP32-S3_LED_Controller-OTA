@@ -1,5 +1,7 @@
 #include "effects_engine.h"
 
+#include <Arduino.h>
+#include <Adafruit_NeoPixel.h>
 #include <FastLED.h>
 
 #include "../Effects/EffectRegistry.h"
@@ -20,9 +22,14 @@
 #define LED_TYPE WS2812B
 #endif
 
+#ifndef DEBUG_EFFECTS_OUTPUT_MAX
+#define DEBUG_EFFECTS_OUTPUT_MAX 0
+#endif
+
 namespace {
 
 CRGB g_leds[LED_STRIP_LENGTH];
+Adafruit_NeoPixel g_strip(LED_STRIP_LENGTH, LED_DATA_PIN, NEO_GRB + NEO_KHZ800);
 portMUX_TYPE g_effectMux = portMUX_INITIALIZER_UNLOCKED;
 
 LedEffectState g_state = {
@@ -30,7 +37,7 @@ LedEffectState g_state = {
     0,
     96,
     128,
-    120,
+  20,
     true,
     255,
     160,
@@ -42,6 +49,42 @@ uint32_t g_frame = 0;
 uint16_t g_phase = 0;
 uint16_t g_activeLedCount = LED_STRIP_LENGTH;
 bool g_effectsInitialized = false;
+
+uint16_t effectiveLedCount(uint16_t requestedCount) {
+  uint16_t clamped = requestedCount > LED_STRIP_LENGTH ? LED_STRIP_LENGTH : requestedCount;
+#if defined(DEBUG_EFFECTS_OUTPUT_MAX) && (DEBUG_EFFECTS_OUTPUT_MAX > 0)
+  if (clamped > DEBUG_EFFECTS_OUTPUT_MAX) {
+    clamped = DEBUG_EFFECTS_OUTPUT_MAX;
+  }
+#endif
+  return clamped;
+}
+
+uint8_t scaleChannel(uint8_t value, uint8_t brightness) {
+  if (brightness >= 255) {
+    return value;
+  }
+
+  return static_cast<uint8_t>((static_cast<uint16_t>(value) * static_cast<uint16_t>(brightness)) / 255U);
+}
+
+void flushStrip(uint16_t activeLedCount, uint8_t brightness) {
+  const uint16_t clampedCount = effectiveLedCount(activeLedCount);
+
+  for (uint16_t i = 0; i < clampedCount; ++i) {
+    const CRGB &pixel = g_leds[i];
+    g_strip.setPixelColor(i,
+                          g_strip.Color(scaleChannel(pixel.r, brightness),
+                                        scaleChannel(pixel.g, brightness),
+                                        scaleChannel(pixel.b, brightness)));
+  }
+
+  for (uint16_t i = clampedCount; i < LED_STRIP_LENGTH; ++i) {
+    g_strip.setPixelColor(i, 0);
+  }
+
+  g_strip.show();
+}
 
 LedEffectState snapshotState() {
   portENTER_CRITICAL(&g_effectMux);
@@ -66,6 +109,14 @@ uint16_t clampFrameDelayMs(uint16_t fps) {
 
   const uint16_t delayMs = static_cast<uint16_t>(1000U / fps);
   return delayMs == 0 ? 1 : delayMs;
+}
+
+uint16_t transportMinFrameDelayMs(uint16_t ledCount) {
+  const uint32_t clampedCount = ledCount == 0 ? 1 : ledCount;
+  // WS2812-class LEDs need about 30 us per pixel plus reset/latch time.
+  const uint32_t frameTimeUs = (clampedCount * 30U) + 300U;
+  const uint16_t delayMs = static_cast<uint16_t>((frameTimeUs + 999U) / 1000U);
+  return delayMs == 0 ? 1 : static_cast<uint16_t>(delayMs + 1U);
 }
 
 void initializeEffectsIfNeeded() {
@@ -99,27 +150,38 @@ EffectDescriptor *activeEffectOrFallback(uint8_t requestedId) {
 }  // namespace
 
 void effectsEngineBegin() {
-  FastLED.addLeds<LED_TYPE, LED_DATA_PIN, LED_COLOR_ORDER>(g_leds, LED_STRIP_LENGTH);
-  FastLED.setBrightness(g_state.brightness);
-  FastLED.setDither(g_state.dither ? BINARY_DITHER : DISABLE_DITHER);
+  Serial.println("[effects] transport init begin");
   fill_solid(g_leds, LED_STRIP_LENGTH, CRGB::Black);
-  FastLED.show();
+  g_strip.begin();
+  g_strip.clear();
+  g_strip.show();
+  Serial.println("[effects] transport init ok");
+  Serial.print("[effects] effective output max: ");
+  Serial.println(effectiveLedCount(LED_STRIP_LENGTH));
 
+#if !defined(DEBUG_DISABLE_EFFECTS_PLUGIN_INIT) || (DEBUG_DISABLE_EFFECTS_PLUGIN_INIT == 0)
+  Serial.println("[effects] plugin init begin");
   initializeEffectsIfNeeded();
+  Serial.println("[effects] plugin init ok");
+#else
+  Serial.println("[effects] plugin init skipped");
+#endif
 }
 
 void effectsEngineTick() {
   const uint32_t now = millis();
   const LedEffectState s = snapshotState();
-  const uint16_t activeLedCount = g_activeLedCount;
+  const uint16_t activeLedCount = effectiveLedCount(g_activeLedCount);
 
   if (!s.powerOn || s.brightness == 0) {
     fill_solid(g_leds, LED_STRIP_LENGTH, CRGB::Black);
-    FastLED.show();
+    flushStrip(activeLedCount, 0);
     return;
   }
 
-  const uint16_t frameDelay = clampFrameDelayMs(s.fps);
+  const uint16_t requestedFrameDelay = clampFrameDelayMs(s.fps);
+  const uint16_t transportFrameDelay = transportMinFrameDelayMs(activeLedCount);
+  const uint16_t frameDelay = requestedFrameDelay > transportFrameDelay ? requestedFrameDelay : transportFrameDelay;
   if (now - g_lastFrameMs < frameDelay) {
     return;
   }
@@ -127,9 +189,6 @@ void effectsEngineTick() {
   g_lastFrameMs = now;
   ++g_frame;
   g_phase = static_cast<uint16_t>(g_phase + map(s.speed, 1, 255, 1, 7));
-
-  FastLED.setBrightness(s.brightness);
-  FastLED.setDither(s.dither ? BINARY_DITHER : DISABLE_DITHER);
 
   EffectDescriptor *active = activeEffectOrFallback(s.pattern);
   if (active != nullptr && active->effect != nullptr) {
@@ -146,7 +205,7 @@ void effectsEngineTick() {
     }
   }
 
-  FastLED.show();
+  flushStrip(activeLedCount, s.brightness);
 }
 
 LedEffectState effectsEngineGetState() {

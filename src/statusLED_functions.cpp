@@ -6,7 +6,7 @@ StatusLedMode g_mode = StatusLedMode::NormalOff;
 uint8_t g_monoPin = LED_BUILTIN;
 bool g_ledLit = false;
 
-#if defined(RGB_BUILTIN)
+#if defined(RGB_BUILTIN) && (!defined(STATUS_LED_FORCE_MONO) || (STATUS_LED_FORCE_MONO == 0))
 const bool kHasRgbBuiltin = true;
 #else
 const bool kHasRgbBuiltin = false;
@@ -20,7 +20,7 @@ void writeMono(bool on) {
 void writeColor(uint8_t r, uint8_t g, uint8_t b) {
   g_ledLit = (r > 0 || g > 0 || b > 0);
 
-#if defined(RGB_BUILTIN)
+#if defined(RGB_BUILTIN) && (!defined(STATUS_LED_FORCE_MONO) || (STATUS_LED_FORCE_MONO == 0))
   neopixelWrite(RGB_BUILTIN, r, g, b);
 #else
   // Fallback for boards without RGB LED: any color maps to ON.
@@ -34,7 +34,7 @@ void statusLedBegin(uint8_t fallbackPin) {
   g_monoPin = fallbackPin;
   pinMode(g_monoPin, OUTPUT);
 
-#if defined(RGB_BUILTIN)
+#if defined(RGB_BUILTIN) && (!defined(STATUS_LED_FORCE_MONO) || (STATUS_LED_FORCE_MONO == 0))
   writeColor(0, 0, 0);
 #else
   writeMono(false);
