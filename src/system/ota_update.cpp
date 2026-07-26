@@ -6,6 +6,8 @@
 #include <Update.h>
 #include <WiFiClientSecure.h>
 
+#include "../statusLED_functions.h"
+
 #ifndef APP_VERSION
 #define APP_VERSION "0.1.0"
 #endif
@@ -20,6 +22,7 @@ static const int32_t OTA_MIN_IMAGE_BYTES = 128 * 1024;
 String g_lastStatus = "idle";
 String g_latestVersion = "";
 bool g_updateAvailable = false;
+bool g_installing = false;
 bool g_busy = false;
 bool g_checkNowRequested = false;
 bool g_installNowRequested = false;
@@ -368,8 +371,11 @@ void runCheckAndMaybeUpdate(bool allowInstall) {
   }
 
   g_lastStatus = String("Updating to ") + tag + "...";
+  g_installing = true;
+  statusLedSetMode(StatusLedMode::OtaInstallingSolidPurple);
 
   if (!performOtaFromUrl(binUrl, err)) {
+    g_installing = false;
     g_lastStatus = String("OTA failed: ") + err;
     return;
   }
@@ -385,6 +391,7 @@ void otaUpdateBegin() {
   g_lastStatus = String("ready (v") + APP_VERSION + ")";
   g_latestVersion = "";
   g_updateAvailable = false;
+  g_installing = false;
   g_busy = false;
   g_checkNowRequested = false;
   g_installNowRequested = false;
@@ -450,4 +457,8 @@ bool otaUpdateIsBusy() {
 
 bool otaUpdateIsUpdateAvailable() {
   return g_updateAvailable;
+}
+
+bool otaUpdateIsInstalling() {
+  return g_installing;
 }

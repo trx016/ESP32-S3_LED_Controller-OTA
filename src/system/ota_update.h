@@ -12,3 +12,4 @@ String otaUpdateGetLatestVersion();
 String otaUpdateGetLastStatus();
 bool otaUpdateIsBusy();
 bool otaUpdateIsUpdateAvailable();
+bool otaUpdateIsInstalling();

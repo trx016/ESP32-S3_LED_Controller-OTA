@@ -88,6 +88,10 @@ void statusLedTick() {
       break;
     }
 
+    case StatusLedMode::OtaInstallingSolidPurple:
+      writeColor(64, 0, 64);
+      break;
+
     case StatusLedMode::NoWifiBlinkBlueRed: {
       const bool phase = ((now / 300U) % 2U) == 0U;
       if (phase) {

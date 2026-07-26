@@ -115,6 +115,8 @@ String statusLedModeName(StatusLedMode mode) {
       return "wifi-connected-breath-green";
     case StatusLedMode::OtaUpdateAvailableBreathPurple:
       return "ota-update-available-breath-purple";
+    case StatusLedMode::OtaInstallingSolidPurple:
+      return "ota-installing-solid-purple";
     case StatusLedMode::NoWifiBlinkBlueRed:
       return "no-wifi-blink-blue-red";
     case StatusLedMode::NoInternetBlinkBlue:
@@ -225,6 +227,8 @@ void updateStatusLedMode() {
 
   if (systemError) {
     statusLedSetMode(StatusLedMode::ErrorBlinkRed);
+  } else if (otaUpdateIsInstalling()) {
+    statusLedSetMode(StatusLedMode::OtaInstallingSolidPurple);
   } else if (WiFi.status() != WL_CONNECTED) {
     statusLedSetMode(StatusLedMode::NoWifiBlinkBlueRed);
   } else if (isConnectionBreathWindowActive(nowMs)) {
