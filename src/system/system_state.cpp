@@ -360,6 +360,7 @@ String systemStateStatusJson() {
   json += "\"ssid\":\"" + savedSsid + "\",";
   json += "\"auto_ota\":" + String(autoOtaEnabled ? "true" : "false") + ",";
   json += "\"ota_busy\":" + String(otaUpdateIsBusy() ? "true" : "false") + ",";
+  json += "\"ota_update_available\":" + String(otaUpdateIsUpdateAvailable() ? "true" : "false") + ",";
   json += "\"ota_current\":\"" + otaUpdateGetCurrentVersion() + "\",";
   json += "\"ota_latest\":\"" + otaUpdateGetLatestVersion() + "\",";
   json += "\"ota_status\":\"" + otaUpdateGetLastStatus() + "\",";

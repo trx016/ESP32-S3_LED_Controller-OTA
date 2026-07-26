@@ -149,7 +149,7 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
       <div class="row">
         <button onclick="saveSettings()">Save Settings</button>
         <button class="alt" onclick="checkOtaNow()">Check OTA Now</button>
-        <button onclick="installOtaNow()">Install Update Now</button>
+        <button id="installBtn" onclick="installOtaNow()" style="display:none;">Install Update Now</button>
         <a class="btn alt" id="backBtn" href="/">Back</a>
       </div>
 
@@ -176,6 +176,11 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
       document.getElementById('otaCurrent').textContent = s.ota_current || '-';
       document.getElementById('otaLatest').textContent = s.ota_latest || '-';
       document.getElementById('otaStatus').textContent = s.ota_status || '-';
+
+      const installBtn = document.getElementById('installBtn');
+      const manualMode = !s.auto_ota;
+      const hasUpdate = !!s.ota_update_available;
+      installBtn.style.display = (manualMode && hasUpdate) ? 'inline-block' : 'none';
     }
 
     async function saveSettings() {
