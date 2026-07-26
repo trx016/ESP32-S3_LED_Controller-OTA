@@ -1,8 +1,8 @@
 #include "effects_engine.h"
 
 #include <Arduino.h>
-#include <Adafruit_NeoPixel.h>
 #include <FastLED.h>
+#include <NeoPixelBus.h>
 
 #include "../Effects/EffectRegistry.h"
 
@@ -14,6 +14,10 @@
 #define LED_STRIP_LENGTH 1600
 #endif
 
+#ifndef LED_TRANSPORT_MAX
+#define LED_TRANSPORT_MAX 256
+#endif
+
 #ifndef LED_COLOR_ORDER
 #define LED_COLOR_ORDER GRB
 #endif
@@ -22,14 +26,13 @@
 #define LED_TYPE WS2812B
 #endif
 
-#ifndef DEBUG_EFFECTS_OUTPUT_MAX
-#define DEBUG_EFFECTS_OUTPUT_MAX 0
-#endif
-
 namespace {
 
+const uint16_t kTransportLedCount =
+  (LED_TRANSPORT_MAX > LED_STRIP_LENGTH) ? LED_STRIP_LENGTH : LED_TRANSPORT_MAX;
+
 CRGB g_leds[LED_STRIP_LENGTH];
-Adafruit_NeoPixel g_strip(LED_STRIP_LENGTH, LED_DATA_PIN, NEO_GRB + NEO_KHZ800);
+NeoPixelBus<NeoGrbFeature, NeoEsp32BitBangWs2812Method> g_strip(kTransportLedCount, LED_DATA_PIN);
 portMUX_TYPE g_effectMux = portMUX_INITIALIZER_UNLOCKED;
 
 LedEffectState g_state = {
@@ -49,15 +52,10 @@ uint32_t g_frame = 0;
 uint16_t g_phase = 0;
 uint16_t g_activeLedCount = LED_STRIP_LENGTH;
 bool g_effectsInitialized = false;
+bool g_lastFrameWasOff = false;
 
 uint16_t effectiveLedCount(uint16_t requestedCount) {
-  uint16_t clamped = requestedCount > LED_STRIP_LENGTH ? LED_STRIP_LENGTH : requestedCount;
-#if defined(DEBUG_EFFECTS_OUTPUT_MAX) && (DEBUG_EFFECTS_OUTPUT_MAX > 0)
-  if (clamped > DEBUG_EFFECTS_OUTPUT_MAX) {
-    clamped = DEBUG_EFFECTS_OUTPUT_MAX;
-  }
-#endif
-  return clamped;
+  return requestedCount > kTransportLedCount ? kTransportLedCount : requestedCount;
 }
 
 uint8_t scaleChannel(uint8_t value, uint8_t brightness) {
@@ -70,20 +68,21 @@ uint8_t scaleChannel(uint8_t value, uint8_t brightness) {
 
 void flushStrip(uint16_t activeLedCount, uint8_t brightness) {
   const uint16_t clampedCount = effectiveLedCount(activeLedCount);
+  const uint16_t transportCount = kTransportLedCount;
 
   for (uint16_t i = 0; i < clampedCount; ++i) {
     const CRGB &pixel = g_leds[i];
-    g_strip.setPixelColor(i,
-                          g_strip.Color(scaleChannel(pixel.r, brightness),
-                                        scaleChannel(pixel.g, brightness),
-                                        scaleChannel(pixel.b, brightness)));
+    g_strip.SetPixelColor(i,
+                          RgbColor(scaleChannel(pixel.r, brightness),
+                                   scaleChannel(pixel.g, brightness),
+                                   scaleChannel(pixel.b, brightness)));
   }
 
-  for (uint16_t i = clampedCount; i < LED_STRIP_LENGTH; ++i) {
-    g_strip.setPixelColor(i, 0);
+  for (uint16_t i = clampedCount; i < transportCount; ++i) {
+    g_strip.SetPixelColor(i, RgbColor(0, 0, 0));
   }
 
-  g_strip.show();
+  g_strip.Show();
 }
 
 LedEffectState snapshotState() {
@@ -150,37 +149,38 @@ EffectDescriptor *activeEffectOrFallback(uint8_t requestedId) {
 }  // namespace
 
 void effectsEngineBegin() {
-  Serial.println("[effects] transport init begin");
   fill_solid(g_leds, LED_STRIP_LENGTH, CRGB::Black);
-  g_strip.begin();
-  g_strip.clear();
-  g_strip.show();
-  Serial.println("[effects] transport init ok");
-  Serial.print("[effects] effective output max: ");
-  Serial.println(effectiveLedCount(LED_STRIP_LENGTH));
-
-#if !defined(DEBUG_DISABLE_EFFECTS_PLUGIN_INIT) || (DEBUG_DISABLE_EFFECTS_PLUGIN_INIT == 0)
-  Serial.println("[effects] plugin init begin");
+  g_strip.Begin();
+  g_strip.ClearTo(RgbColor(0, 0, 0));
+  g_strip.Show();
   initializeEffectsIfNeeded();
-  Serial.println("[effects] plugin init ok");
-#else
-  Serial.println("[effects] plugin init skipped");
-#endif
 }
 
 void effectsEngineTick() {
   const uint32_t now = millis();
   const LedEffectState s = snapshotState();
   const uint16_t activeLedCount = effectiveLedCount(g_activeLedCount);
+  const uint16_t transportFrameDelay = transportMinFrameDelayMs(activeLedCount);
 
   if (!s.powerOn || s.brightness == 0) {
+    if (g_lastFrameWasOff) {
+      return;
+    }
+
+    if (now - g_lastFrameMs < transportFrameDelay) {
+      return;
+    }
+
+    g_lastFrameMs = now;
+    g_lastFrameWasOff = true;
     fill_solid(g_leds, LED_STRIP_LENGTH, CRGB::Black);
     flushStrip(activeLedCount, 0);
     return;
   }
 
+  g_lastFrameWasOff = false;
+
   const uint16_t requestedFrameDelay = clampFrameDelayMs(s.fps);
-  const uint16_t transportFrameDelay = transportMinFrameDelayMs(activeLedCount);
   const uint16_t frameDelay = requestedFrameDelay > transportFrameDelay ? requestedFrameDelay : transportFrameDelay;
   if (now - g_lastFrameMs < frameDelay) {
     return;
@@ -263,7 +263,7 @@ void effectsEngineSetColor(uint8_t red, uint8_t green, uint8_t blue) {
 }
 
 void effectsEngineSetActiveLedCount(uint16_t count) {
-  g_activeLedCount = static_cast<uint16_t>(constrain(count, static_cast<uint16_t>(1), static_cast<uint16_t>(LED_STRIP_LENGTH)));
+  g_activeLedCount = static_cast<uint16_t>(constrain(count, static_cast<uint16_t>(1), effectsEngineGetMaxLedCount()));
 }
 
 uint16_t effectsEngineGetActiveLedCount() {
@@ -271,7 +271,7 @@ uint16_t effectsEngineGetActiveLedCount() {
 }
 
 uint16_t effectsEngineGetMaxLedCount() {
-  return LED_STRIP_LENGTH;
+  return effectiveLedCount(LED_STRIP_LENGTH);
 }
 
 String effectsEngineStateJson() {
@@ -295,7 +295,7 @@ String effectsEngineStateJson() {
   out += ",\"green\":" + String(s.green);
   out += ",\"blue\":" + String(s.blue);
   out += ",\"active_leds\":" + String(g_activeLedCount);
-  out += ",\"max_leds\":" + String(LED_STRIP_LENGTH);
+  out += ",\"max_leds\":" + String(effectiveLedCount(LED_STRIP_LENGTH));
   out += "}";
   return out;
 }

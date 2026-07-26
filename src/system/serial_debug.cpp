@@ -88,7 +88,7 @@ void serialDebugPrintNetworkStartup(const String &apSsid, bool staConnected, boo
 }
 
 void serialDebugPrintTaskStartup() {
-  Serial.println("Tasks started: webTask on Core 0, ledTask on Core 1");
+  Serial.println("Runtime mode: single loop (network + effects + status)");
 }
 
 void serialDebugPrintNetworkSnapshot(const char *reason) {

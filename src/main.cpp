@@ -28,14 +28,9 @@ void setup() {
   statusLedBegin(LED_PIN);
 
   systemStateBegin();
-#if !defined(DEBUG_DISABLE_EFFECTS_INIT) || (DEBUG_DISABLE_EFFECTS_INIT == 0)
-  effectsEngineBegin();
   effectsEngineSetActiveLedCount(systemStateGetLedCount());
-#endif
-
-#if !defined(DEBUG_DISABLE_OTA_RUNTIME) || (DEBUG_DISABLE_OTA_RUNTIME == 0)
+  effectsEngineBegin();
   otaUpdateBegin();
-#endif
   systemStateStartAccessPoint(dnsServer);
   const bool connected = systemStateConnectToSavedWifi();
   systemStateSetError(false);
@@ -49,9 +44,16 @@ void setup() {
 }
 
 void loop() {
-#if defined(DEBUG_EFFECTS_RUN_ON_MAIN_LOOP) && (DEBUG_EFFECTS_RUN_ON_MAIN_LOOP == 1)
+  const uint32_t nowMs = millis();
+  systemStateProcessConnectivityTick(nowMs);
+  otaUpdateProcessTick(nowMs, systemStateIsStaConnected(), systemStateHasInternet(), systemStateIsAutoOtaEnabled());
+  if (systemStateIsApEnabled()) {
+    dnsServer.processNextRequest();
+  }
+  server.handleClient();
+
   effectsEngineTick();
-#endif
+  statusLedTick();
   serialDebugPollCommands();
-  vTaskDelay(pdMS_TO_TICKS(20));
+  vTaskDelay(pdMS_TO_TICKS(2));
 }

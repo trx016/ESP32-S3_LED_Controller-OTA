@@ -13,9 +13,15 @@
 #define LED_STRIP_LENGTH 1600
 #endif
 
+#ifndef LED_TRANSPORT_MAX
+#define LED_TRANSPORT_MAX 256
+#endif
+
 namespace {
 
 static const char *AP_SSID_PREFIX = "LED-Controller-Setup";
+static const uint16_t MAX_LED_COUNT =
+  (LED_TRANSPORT_MAX > LED_STRIP_LENGTH) ? LED_STRIP_LENGTH : LED_TRANSPORT_MAX;
 
 Preferences preferences;
 
@@ -179,8 +185,8 @@ void loadSettings() {
   preferences.begin("settings", true);
   autoOtaEnabled = preferences.getBool("auto_ota", false);
   internetEnabled = preferences.getBool("internet_enabled", true);
-  const uint32_t storedLedCount = preferences.getUInt("led_count", LED_STRIP_LENGTH);
-  ledCount = static_cast<uint16_t>(constrain(storedLedCount, 1U, static_cast<uint32_t>(LED_STRIP_LENGTH)));
+  const uint32_t storedLedCount = preferences.getUInt("led_count", MAX_LED_COUNT);
+  ledCount = static_cast<uint16_t>(constrain(storedLedCount, 1U, static_cast<uint32_t>(MAX_LED_COUNT)));
   preferences.end();
 }
 
@@ -420,7 +426,7 @@ String systemStateStatusJson() {
   json += "\"auto_ota\":" + String(autoOtaEnabled ? "true" : "false") + ",";
   json += "\"internet_enabled\":" + String(internetEnabled ? "true" : "false") + ",";
   json += "\"led_count\":" + String(ledCount) + ",";
-  json += "\"led_count_max\":" + String(LED_STRIP_LENGTH) + ",";
+  json += "\"led_count_max\":" + String(MAX_LED_COUNT) + ",";
   json += "\"ota_busy\":" + String(otaUpdateIsBusy() ? "true" : "false") + ",";
   json += "\"ota_update_available\":" + String(otaUpdateIsUpdateAvailable() ? "true" : "false") + ",";
   json += "\"ota_current\":\"" + otaUpdateGetCurrentVersion() + "\",";
@@ -470,7 +476,7 @@ bool systemStateIsInternetEnabled() {
 }
 
 void systemStateSetLedCount(uint16_t count) {
-  const uint16_t clamped = static_cast<uint16_t>(constrain(count, static_cast<uint16_t>(1), static_cast<uint16_t>(LED_STRIP_LENGTH)));
+  const uint16_t clamped = static_cast<uint16_t>(constrain(count, static_cast<uint16_t>(1), MAX_LED_COUNT));
   if (ledCount == clamped) {
     return;
   }
