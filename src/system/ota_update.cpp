@@ -1,5 +1,7 @@
 #include "ota_update.h"
 
+#include <ctype.h>
+
 #include <HTTPClient.h>
 #include <Update.h>
 #include <WiFiClientSecure.h>
@@ -13,12 +15,20 @@ namespace {
 static const char *GITHUB_OWNER = "trx016";
 static const char *GITHUB_REPO = "ESP32-S3_LED_Controller-OTA";
 static const uint32_t OTA_CHECK_INTERVAL_MS = 6UL * 60UL * 60UL * 1000UL;
+static const int32_t OTA_MIN_IMAGE_BYTES = 128 * 1024;
 
 String g_lastStatus = "idle";
 String g_latestVersion = "";
 bool g_busy = false;
 bool g_checkNowRequested = false;
 uint32_t g_nextAutoCheckMs = 0;
+
+struct SemVersion {
+  int major = 0;
+  int minor = 0;
+  int patch = 0;
+  bool valid = false;
+};
 
 String jsonExtractString(const String &json, const String &key) {
   const String token = String("\"") + key + "\"";
@@ -73,6 +83,52 @@ String findFirstBinAssetUrl(const String &json) {
   }
 }
 
+String findPreferredBinAssetUrl(const String &json) {
+  int scanFrom = 0;
+  String fallbackUrl;
+
+  while (true) {
+    const int nameKey = json.indexOf("\"name\"", scanFrom);
+    if (nameKey < 0) {
+      return fallbackUrl;
+    }
+
+    const int nameQuote1 = json.indexOf('"', json.indexOf(':', nameKey) + 1);
+    const int nameQuote2 = nameQuote1 >= 0 ? json.indexOf('"', nameQuote1 + 1) : -1;
+    if (nameQuote1 < 0 || nameQuote2 < 0) {
+      return fallbackUrl;
+    }
+
+    const String assetName = json.substring(nameQuote1 + 1, nameQuote2);
+    const int urlKey = json.indexOf("\"browser_download_url\"", nameQuote2);
+    if (urlKey < 0) {
+      return fallbackUrl;
+    }
+
+    const int urlQuote1 = json.indexOf('"', json.indexOf(':', urlKey) + 1);
+    const int urlQuote2 = urlQuote1 >= 0 ? json.indexOf('"', urlQuote1 + 1) : -1;
+    if (urlQuote1 < 0 || urlQuote2 < 0) {
+      return fallbackUrl;
+    }
+
+    const String assetUrl = json.substring(urlQuote1 + 1, urlQuote2);
+    const bool isBin = assetName.endsWith(".bin") || assetUrl.endsWith(".bin");
+    if (isBin) {
+      if (fallbackUrl.isEmpty()) {
+        fallbackUrl = assetUrl;
+      }
+
+      String loweredName = assetName;
+      loweredName.toLowerCase();
+      if (loweredName.indexOf("firmware") >= 0 || loweredName.indexOf("led_controller") >= 0) {
+        return assetUrl;
+      }
+    }
+
+    scanFrom = urlQuote2 + 1;
+  }
+}
+
 String normalizeVersion(const String &input) {
   String v = input;
   v.trim();
@@ -82,10 +138,73 @@ String normalizeVersion(const String &input) {
   return v;
 }
 
-bool isNewerVersionAvailable(const String &latestTag) {
-  const String current = normalizeVersion(APP_VERSION);
-  const String latest = normalizeVersion(latestTag);
-  return !latest.isEmpty() && latest != current;
+SemVersion parseSemVersion(const String &input) {
+  const String normalized = normalizeVersion(input);
+  SemVersion out;
+
+  if (normalized.isEmpty()) {
+    return out;
+  }
+
+  int values[3] = {0, 0, 0};
+  int partIndex = 0;
+  int pos = 0;
+
+  while (partIndex < 3 && pos < normalized.length()) {
+    String token;
+    while (pos < normalized.length() && normalized[pos] != '.') {
+      token += normalized[pos++];
+    }
+    if (pos < normalized.length() && normalized[pos] == '.') {
+      ++pos;
+    }
+
+    String digits;
+    for (size_t i = 0; i < token.length(); ++i) {
+      const char c = token[i];
+      if (isdigit(static_cast<unsigned char>(c)) == 0) {
+        break;
+      }
+      digits += c;
+    }
+
+    if (digits.isEmpty()) {
+      return out;
+    }
+
+    values[partIndex++] = digits.toInt();
+  }
+
+  out.major = values[0];
+  out.minor = values[1];
+  out.patch = values[2];
+  out.valid = true;
+  return out;
+}
+
+bool isLatestNewer(const String &latestTag, String &outReason) {
+  const SemVersion current = parseSemVersion(APP_VERSION);
+  const SemVersion latest = parseSemVersion(latestTag);
+
+  if (!current.valid || !latest.valid) {
+    outReason = "Invalid version format";
+    return false;
+  }
+
+  if (latest.major != current.major) {
+    return latest.major > current.major;
+  }
+
+  if (latest.minor != current.minor) {
+    return latest.minor > current.minor;
+  }
+
+  if (latest.patch != current.patch) {
+    return latest.patch > current.patch;
+  }
+
+  outReason = "Already up to date";
+  return false;
 }
 
 bool fetchLatestRelease(String &outTag, String &outBinUrl, String &outError) {
@@ -100,7 +219,10 @@ bool fetchLatestRelease(String &outTag, String &outBinUrl, String &outError) {
     return false;
   }
 
+  http.setTimeout(12000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.addHeader("User-Agent", "ESP32-LED-Controller");
+  http.addHeader("Accept", "application/vnd.github+json");
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
     outError = String("Release API HTTP ") + code;
@@ -112,7 +234,11 @@ bool fetchLatestRelease(String &outTag, String &outBinUrl, String &outError) {
   http.end();
 
   outTag = jsonExtractString(payload, "tag_name");
-  outBinUrl = findFirstBinAssetUrl(payload);
+  outBinUrl = findPreferredBinAssetUrl(payload);
+
+  if (outBinUrl.isEmpty()) {
+    outBinUrl = findFirstBinAssetUrl(payload);
+  }
 
   if (outTag.isEmpty()) {
     outError = "No tag_name in release";
@@ -132,6 +258,8 @@ bool performOtaFromUrl(const String &binUrl, String &outError) {
     return false;
   }
 
+  http.setTimeout(18000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.addHeader("User-Agent", "ESP32-LED-Controller");
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
@@ -141,6 +269,12 @@ bool performOtaFromUrl(const String &binUrl, String &outError) {
   }
 
   const int contentLength = http.getSize();
+  if (contentLength > 0 && contentLength < OTA_MIN_IMAGE_BYTES) {
+    outError = "Firmware image unexpectedly small";
+    http.end();
+    return false;
+  }
+
   if (!Update.begin(contentLength > 0 ? static_cast<size_t>(contentLength) : UPDATE_SIZE_UNKNOWN)) {
     outError = String("Update.begin failed: ") + Update.errorString();
     http.end();
@@ -183,7 +317,18 @@ void runCheckAndMaybeUpdate() {
   }
 
   g_latestVersion = tag;
-  if (!isNewerVersionAvailable(tag)) {
+  if (!binUrl.startsWith("https://")) {
+    g_lastStatus = "Release asset URL must be HTTPS";
+    return;
+  }
+
+  String versionReason;
+  if (!isLatestNewer(tag, versionReason)) {
+    if (versionReason == "Invalid version format") {
+      g_lastStatus = String("Version parse error. Current=") + APP_VERSION + ", latest=" + tag;
+      return;
+    }
+
     g_lastStatus = String("Already up to date (") + APP_VERSION + ")";
     return;
   }

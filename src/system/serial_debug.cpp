@@ -2,6 +2,7 @@
 
 #include <WiFi.h>
 
+#include "ota_update.h"
 #include "system_state.h"
 
 namespace {
@@ -15,6 +16,7 @@ void serialDebugPrintCommandHelp() {
   Serial.println("  commands   - show this help");
   Serial.println("  ?          - show this help");
   Serial.println("  clearwifi  - clear saved Wi-Fi credentials");
+  Serial.println("  otacheck   - trigger immediate OTA check");
 }
 
 void serialDebugHandleCommand(String cmd) {
@@ -34,6 +36,12 @@ void serialDebugHandleCommand(String cmd) {
     systemStateClearWifiCredentials();
     Serial.println("Saved Wi-Fi credentials cleared.");
     Serial.println("You can now test setup mode and enter new credentials.");
+    return;
+  }
+
+  if (cmd == "otacheck") {
+    otaUpdateRequestCheckNow();
+    Serial.println("OTA check requested.");
     return;
   }
 
