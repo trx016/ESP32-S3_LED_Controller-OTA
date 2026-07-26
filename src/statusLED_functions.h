@@ -5,6 +5,7 @@
 enum class StatusLedMode : uint8_t {
   NormalOff = 0,
   WifiConnectedBreathGreen,
+  OtaUpdateAvailableBreathPurple,
   NoWifiBlinkBlueRed,
   NoInternetBlinkBlue,
   ErrorBlinkRed,

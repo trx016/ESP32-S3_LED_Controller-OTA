@@ -74,6 +74,20 @@ void statusLedTick() {
       break;
     }
 
+    case StatusLedMode::OtaUpdateAvailableBreathPurple: {
+      const uint32_t phase = now % 3000U;
+      uint8_t level = 0;
+      if (phase < 1500U) {
+        level = static_cast<uint8_t>(phase / 20U);
+      } else {
+        level = static_cast<uint8_t>((3000U - phase) / 20U);
+      }
+
+      // Purple = red + blue
+      writeColor(level, 0, level);
+      break;
+    }
+
     case StatusLedMode::NoWifiBlinkBlueRed: {
       const bool phase = ((now / 300U) % 2U) == 0U;
       if (phase) {

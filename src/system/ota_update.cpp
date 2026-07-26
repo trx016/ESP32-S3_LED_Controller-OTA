@@ -19,6 +19,7 @@ static const int32_t OTA_MIN_IMAGE_BYTES = 128 * 1024;
 
 String g_lastStatus = "idle";
 String g_latestVersion = "";
+bool g_updateAvailable = false;
 bool g_busy = false;
 bool g_checkNowRequested = false;
 uint32_t g_nextAutoCheckMs = 0;
@@ -324,7 +325,7 @@ bool performOtaFromUrl(const String &binUrl, String &outError) {
   return true;
 }
 
-void runCheckAndMaybeUpdate() {
+void runCheckAndMaybeUpdate(bool allowInstall) {
   String tag;
   String binUrl;
   String err;
@@ -342,6 +343,7 @@ void runCheckAndMaybeUpdate() {
 
   String versionReason;
   if (!isLatestNewer(tag, versionReason)) {
+    g_updateAvailable = false;
     if (versionReason == "Invalid version format") {
       g_lastStatus = String("Version parse error. Current=") + APP_VERSION + ", latest=" + tag;
       return;
@@ -352,7 +354,15 @@ void runCheckAndMaybeUpdate() {
   }
 
   if (binUrl.isEmpty()) {
+    g_updateAvailable = true;
     g_lastStatus = "New release found, but no .bin asset";
+    return;
+  }
+
+  g_updateAvailable = true;
+
+  if (!allowInstall) {
+    g_lastStatus = String("Update available: ") + tag + " (manual mode)";
     return;
   }
 
@@ -373,6 +383,7 @@ void runCheckAndMaybeUpdate() {
 void otaUpdateBegin() {
   g_lastStatus = String("ready (v") + APP_VERSION + ")";
   g_latestVersion = "";
+  g_updateAvailable = false;
   g_busy = false;
   g_checkNowRequested = false;
   g_nextAutoCheckMs = millis() + 20000;
@@ -395,7 +406,7 @@ void otaUpdateProcessTick(uint32_t nowMs, bool staConnected, bool internetConnec
   g_busy = true;
   g_checkNowRequested = false;
   g_nextAutoCheckMs = nowMs + OTA_CHECK_INTERVAL_MS;
-  runCheckAndMaybeUpdate();
+  runCheckAndMaybeUpdate(autoEnabled);
   g_busy = false;
 }
 
@@ -417,4 +428,8 @@ String otaUpdateGetLastStatus() {
 
 bool otaUpdateIsBusy() {
   return g_busy;
+}
+
+bool otaUpdateIsUpdateAvailable() {
+  return g_updateAvailable;
 }

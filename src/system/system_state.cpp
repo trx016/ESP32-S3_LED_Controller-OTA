@@ -113,6 +113,8 @@ String statusLedModeName(StatusLedMode mode) {
       return "normal-off";
     case StatusLedMode::WifiConnectedBreathGreen:
       return "wifi-connected-breath-green";
+    case StatusLedMode::OtaUpdateAvailableBreathPurple:
+      return "ota-update-available-breath-purple";
     case StatusLedMode::NoWifiBlinkBlueRed:
       return "no-wifi-blink-blue-red";
     case StatusLedMode::NoInternetBlinkBlue:
@@ -227,6 +229,8 @@ void updateStatusLedMode() {
     statusLedSetMode(StatusLedMode::NoWifiBlinkBlueRed);
   } else if (isConnectionBreathWindowActive(nowMs)) {
     statusLedSetMode(StatusLedMode::WifiConnectedBreathGreen);
+  } else if (internetConnected && !autoOtaEnabled && otaUpdateIsUpdateAvailable()) {
+    statusLedSetMode(StatusLedMode::OtaUpdateAvailableBreathPurple);
   } else if (!internetConnected) {
     statusLedSetMode(StatusLedMode::NoInternetBlinkBlue);
   } else {
