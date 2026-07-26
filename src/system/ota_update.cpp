@@ -212,9 +212,10 @@ bool fetchLatestRelease(String &outTag, String &outBinUrl, String &outError) {
   client.setInsecure();
 
   HTTPClient http;
-  const String url = String("https://api.github.com/repos/") + GITHUB_OWNER + "/" + GITHUB_REPO + "/releases/latest";
+  const String baseUrl = String("https://api.github.com/repos/") + GITHUB_OWNER + "/" + GITHUB_REPO;
+  const String latestUrl = baseUrl + "/releases/latest";
 
-  if (!http.begin(client, url)) {
+  if (!http.begin(client, latestUrl)) {
     outError = "Failed to start release request";
     return false;
   }
@@ -223,15 +224,32 @@ bool fetchLatestRelease(String &outTag, String &outBinUrl, String &outError) {
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.addHeader("User-Agent", "ESP32-LED-Controller");
   http.addHeader("Accept", "application/vnd.github+json");
-  const int code = http.GET();
-  if (code != HTTP_CODE_OK) {
-    outError = String("Release API HTTP ") + code;
+  int code = http.GET();
+  String payload = http.getString();
+  http.end();
+
+  // Fallback for accounts/repos where /latest is unavailable.
+  if (code == HTTP_CODE_NOT_FOUND) {
+    const String listUrl = baseUrl + "/releases?per_page=1";
+    if (!http.begin(client, listUrl)) {
+      outError = "Failed to start fallback release request";
+      return false;
+    }
+
+    http.setTimeout(12000);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.addHeader("User-Agent", "ESP32-LED-Controller");
+    http.addHeader("Accept", "application/vnd.github+json");
+
+    code = http.GET();
+    payload = http.getString();
     http.end();
-    return false;
   }
 
-  const String payload = http.getString();
-  http.end();
+  if (code != HTTP_CODE_OK) {
+    outError = String("Release API HTTP ") + code;
+    return false;
+  }
 
   outTag = jsonExtractString(payload, "tag_name");
   outBinUrl = findPreferredBinAssetUrl(payload);
@@ -241,7 +259,7 @@ bool fetchLatestRelease(String &outTag, String &outBinUrl, String &outError) {
   }
 
   if (outTag.isEmpty()) {
-    outError = "No tag_name in release";
+    outError = "No tag_name in release payload";
     return false;
   }
 
