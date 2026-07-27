@@ -27,6 +27,10 @@
 #define LED_TYPE WS2812B
 #endif
 
+#ifndef LED_TRANSPORT_USE_BITBANG
+#define LED_TRANSPORT_USE_BITBANG 0
+#endif
+
 namespace {
 
 const uint16_t kTransportLedCount =
@@ -38,7 +42,12 @@ const uint8_t kSolidPatternId = 1;
 const char *kDirectRgbPatternName = "Direct RGB";
 
 CRGB g_leds[LED_STRIP_LENGTH];
-NeoPixelBus<NeoGrbFeature, NeoEsp32BitBangWs2812Method> g_strip(kTransportLedCount, LED_DATA_PIN);
+#if LED_TRANSPORT_USE_BITBANG
+using LedTransportMethod = NeoEsp32BitBangWs2812Method;
+#else
+using LedTransportMethod = NeoEsp32Rmt1Ws2812xMethod;
+#endif
+NeoPixelBus<NeoGrbFeature, LedTransportMethod> g_strip(kTransportLedCount, LED_DATA_PIN);
 portMUX_TYPE g_effectMux = portMUX_INITIALIZER_UNLOCKED;
 
 LedEffectState g_state = {
@@ -75,10 +84,17 @@ uint8_t scaleChannel(uint8_t value, uint8_t brightness) {
   return static_cast<uint8_t>((static_cast<uint16_t>(value) * static_cast<uint16_t>(brightness)) / 255U);
 }
 
-bool isAllBlack(uint16_t activeLedCount) {
+bool isAllBlackAfterBrightness(uint16_t activeLedCount, uint8_t brightness) {
+  if (brightness == 0) {
+    return true;
+  }
+
   const uint16_t clampedCount = effectiveLedCount(activeLedCount);
   for (uint16_t i = 0; i < clampedCount; ++i) {
-    if (g_leds[i].r != 0 || g_leds[i].g != 0 || g_leds[i].b != 0) {
+    const CRGB &pixel = g_leds[i];
+    if (scaleChannel(pixel.r, brightness) != 0 ||
+        scaleChannel(pixel.g, brightness) != 0 ||
+        scaleChannel(pixel.b, brightness) != 0) {
       return false;
     }
   }
@@ -252,7 +268,7 @@ void effectsEngineTick() {
     }
   }
 
-  const bool frameIsBlack = isAllBlack(activeLedCount);
+  const bool frameIsBlack = isAllBlackAfterBrightness(activeLedCount, s.brightness);
   if (frameIsBlack && g_lastOutputWasBlack) {
     return;
   }
