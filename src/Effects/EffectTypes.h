@@ -17,6 +17,8 @@ struct LedEffectState {
 struct EffectContext {
   LedEffectState state;
   uint32_t nowMs;
+  uint32_t deltaMs;
   uint16_t phase;
   uint32_t frame;
+  uint16_t ledCount;
 };

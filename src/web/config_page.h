@@ -36,6 +36,31 @@ const char CONFIG_PAGE_HTML[] PROGMEM = R"HTML(
       display: grid;
       gap: 16px;
     }
+    .topbar {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(39, 33, 29, 0.12);
+      border-radius: 14px;
+      padding: 10px;
+      backdrop-filter: blur(6px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .nav {
+      border: 1px solid rgba(39, 33, 29, 0.12);
+      border-radius: 10px;
+      padding: 8px 12px;
+      text-decoration: none;
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 13px;
+      background: #ffffff;
+    }
+    .nav.active {
+      border-color: rgba(249, 115, 22, 0.35);
+      background: rgba(249, 115, 22, 0.14);
+      color: #c2410c;
+    }
     .card {
       background: var(--card);
       border: 2px solid rgba(0,0,0,0.07);
@@ -117,6 +142,13 @@ const char CONFIG_PAGE_HTML[] PROGMEM = R"HTML(
 </head>
 <body>
   <div class="wrap">
+    <nav class="topbar">
+      <a class="nav active" href="/setup">Setup</a>
+      <a class="nav" href="/home">Home</a>
+      <a class="nav" href="/effects">Effects</a>
+      <a class="nav" href="/settings">Settings</a>
+    </nav>
+
     <section class="card">
       <h1>ESP32 LED Controller</h1>
       <div class="meta">
@@ -157,6 +189,15 @@ const char CONFIG_PAGE_HTML[] PROGMEM = R"HTML(
 
   <script>
     let handoffAttempted = false;
+    let lastStatusRaw = '';
+    let statusInFlight = false;
+
+    function setTextIfChanged(id, value) {
+      const el = document.getElementById(id);
+      if (el.textContent !== value) {
+        el.textContent = value;
+      }
+    }
 
     function getHostFromUrl(url) {
       try {
@@ -167,55 +208,87 @@ const char CONFIG_PAGE_HTML[] PROGMEM = R"HTML(
     }
 
     async function fetchStatus() {
-      const res = await fetch('/api/status');
-      const s = await res.json();
-      document.getElementById('mode').textContent = s.mode;
-      document.getElementById('apIp').textContent = s.ap_ip;
-      document.getElementById('staIp').textContent = s.sta_ip;
-      document.getElementById('ssid').textContent = s.ssid || '(not set)';
-      document.getElementById('conn').textContent = s.connected ? 'connected' : 'offline';
-      document.getElementById('internet').textContent = s.internet ? 'online' : 'offline';
-      document.getElementById('statusLed').textContent = s.status_led || '-';
-
-      const lanBtn = document.getElementById('lanBtn');
-      const lanUrl = s.lan_url || '';
-
-      if (s.connected && lanUrl.length > 0) {
-        lanBtn.style.display = 'inline-block';
-        lanBtn.dataset.url = lanUrl;
-        lanBtn.textContent = 'Copy LAN URL';
-
-        // If AP has shut down and station is active, attempt seamless handoff.
-        if (s.ap_enabled === false && !handoffAttempted) {
-          const currentHost = window.location.hostname;
-          const targetHost = getHostFromUrl(lanUrl);
-          const onApHost = currentHost === (s.ap_ip || '');
-
-          // Only hand off if still on AP host and target is different.
-          if (onApHost && targetHost.length > 0 && targetHost !== currentHost) {
-            handoffAttempted = true;
-            const m = document.getElementById('msg');
-            m.textContent = `Switching to LAN page: ${lanUrl}`;
-            window.location.href = lanUrl;
-          }
-        }
-      } else {
-        lanBtn.style.display = 'none';
-        lanBtn.dataset.url = '';
-        handoffAttempted = false;
+      if (statusInFlight) {
+        return;
       }
 
-      const ssidInput = document.getElementById('wifiSsid');
-      const passInput = document.getElementById('wifiPass');
-      const deviceInput = document.getElementById('deviceName');
-      const editingForm = document.activeElement === ssidInput
-        || document.activeElement === passInput
-        || document.activeElement === deviceInput;
+      statusInFlight = true;
+      try {
+        const res = await fetch('/api/status');
+        const raw = await res.text();
+        if (!res.ok) {
+          return;
+        }
 
-      // Avoid clobbering user typing when status polling runs.
-      if (!editingForm) {
-        ssidInput.value = s.ssid || '';
-        deviceInput.value = s.device_name || 'Device 1';
+        const s = JSON.parse(raw);
+
+        const lanBtn = document.getElementById('lanBtn');
+        const lanUrl = s.lan_url || '';
+
+        if (s.connected && lanUrl.length > 0) {
+          if (lanBtn.style.display !== 'inline-block') {
+            lanBtn.style.display = 'inline-block';
+          }
+          lanBtn.dataset.url = lanUrl;
+          setTextIfChanged('lanBtn', 'Copy LAN URL');
+
+          // If AP has shut down and station is active, attempt seamless handoff.
+          if (s.ap_enabled === false && !handoffAttempted) {
+            const currentHost = window.location.hostname;
+            const targetHost = getHostFromUrl(lanUrl);
+            const onApHost = currentHost === (s.ap_ip || '');
+
+            // Only hand off if still on AP host and target is different.
+            if (onApHost && targetHost.length > 0 && targetHost !== currentHost) {
+              handoffAttempted = true;
+              const m = document.getElementById('msg');
+              m.textContent = `Switching to LAN page: ${lanUrl}`;
+              window.location.href = lanUrl;
+            }
+          }
+        } else {
+          if (lanBtn.style.display !== 'none') {
+            lanBtn.style.display = 'none';
+          }
+          lanBtn.dataset.url = '';
+          handoffAttempted = false;
+        }
+
+        if (raw === lastStatusRaw) {
+          return;
+        }
+
+        lastStatusRaw = raw;
+
+        setTextIfChanged('mode', s.mode || '-');
+        setTextIfChanged('apIp', s.ap_ip || '-');
+        setTextIfChanged('staIp', s.sta_ip || '-');
+        setTextIfChanged('ssid', s.ssid || '(not set)');
+        setTextIfChanged('conn', s.connected ? 'connected' : 'offline');
+        setTextIfChanged('internet', s.internet ? 'online' : 'offline');
+        setTextIfChanged('statusLed', s.status_led || '-');
+
+        const ssidInput = document.getElementById('wifiSsid');
+        const passInput = document.getElementById('wifiPass');
+        const deviceInput = document.getElementById('deviceName');
+        const editingForm = document.activeElement === ssidInput
+          || document.activeElement === passInput
+          || document.activeElement === deviceInput;
+
+        // Avoid clobbering user typing when status polling runs.
+        if (!editingForm) {
+          const nextSsid = s.ssid || '';
+          if (ssidInput.value !== nextSsid) {
+            ssidInput.value = nextSsid;
+          }
+
+          const nextDevice = s.device_name || 'Device 1';
+          if (deviceInput.value !== nextDevice) {
+            deviceInput.value = nextDevice;
+          }
+        }
+      } finally {
+        statusInFlight = false;
       }
     }
 

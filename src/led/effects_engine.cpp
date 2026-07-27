@@ -5,6 +5,7 @@
 #include <NeoPixelBus.h>
 
 #include "../Effects/EffectRegistry.h"
+#include "../Effects/EffectPresetStore.h"
 
 #ifndef LED_DATA_PIN
 #define LED_DATA_PIN 18
@@ -15,7 +16,7 @@
 #endif
 
 #ifndef LED_TRANSPORT_MAX
-#define LED_TRANSPORT_MAX 256
+#define LED_TRANSPORT_MAX LED_STRIP_LENGTH
 #endif
 
 #ifndef LED_COLOR_ORDER
@@ -30,6 +31,11 @@ namespace {
 
 const uint16_t kTransportLedCount =
   (LED_TRANSPORT_MAX > LED_STRIP_LENGTH) ? LED_STRIP_LENGTH : LED_TRANSPORT_MAX;
+const uint16_t kMinFps = 15;
+const uint16_t kMaxFps = 600;
+const uint8_t kDirectRgbPatternId = 0;
+const uint8_t kSolidPatternId = 1;
+const char *kDirectRgbPatternName = "Direct RGB";
 
 CRGB g_leds[LED_STRIP_LENGTH];
 NeoPixelBus<NeoGrbFeature, NeoEsp32BitBangWs2812Method> g_strip(kTransportLedCount, LED_DATA_PIN);
@@ -37,10 +43,10 @@ portMUX_TYPE g_effectMux = portMUX_INITIALIZER_UNLOCKED;
 
 LedEffectState g_state = {
     true,
-    0,
+    kSolidPatternId,
     96,
     128,
-  20,
+    20,
     true,
     255,
     160,
@@ -53,6 +59,9 @@ uint16_t g_phase = 0;
 uint16_t g_activeLedCount = LED_STRIP_LENGTH;
 bool g_effectsInitialized = false;
 bool g_lastFrameWasOff = false;
+bool g_lastOutputWasBlack = false;
+uint8_t g_lastActivePattern = 0xFF;
+EffectDescriptor g_directRgbFallback = {kDirectRgbPatternId, kDirectRgbPatternName, nullptr, nullptr};
 
 uint16_t effectiveLedCount(uint16_t requestedCount) {
   return requestedCount > kTransportLedCount ? kTransportLedCount : requestedCount;
@@ -64,6 +73,16 @@ uint8_t scaleChannel(uint8_t value, uint8_t brightness) {
   }
 
   return static_cast<uint8_t>((static_cast<uint16_t>(value) * static_cast<uint16_t>(brightness)) / 255U);
+}
+
+bool isAllBlack(uint16_t activeLedCount) {
+  const uint16_t clampedCount = effectiveLedCount(activeLedCount);
+  for (uint16_t i = 0; i < clampedCount; ++i) {
+    if (g_leds[i].r != 0 || g_leds[i].g != 0 || g_leds[i].b != 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void flushStrip(uint16_t activeLedCount, uint8_t brightness) {
@@ -99,11 +118,11 @@ void writeState(const LedEffectState &next) {
 }
 
 uint16_t clampFrameDelayMs(uint16_t fps) {
-  if (fps < 15) {
-    fps = 15;
+  if (fps < kMinFps) {
+    fps = kMinFps;
   }
-  if (fps > 600) {
-    fps = 600;
+  if (fps > kMaxFps) {
+    fps = kMaxFps;
   }
 
   const uint16_t delayMs = static_cast<uint16_t>(1000U / fps);
@@ -116,6 +135,16 @@ uint16_t transportMinFrameDelayMs(uint16_t ledCount) {
   const uint32_t frameTimeUs = (clampedCount * 30U) + 300U;
   const uint16_t delayMs = static_cast<uint16_t>((frameTimeUs + 999U) / 1000U);
   return delayMs == 0 ? 1 : static_cast<uint16_t>(delayMs + 1U);
+}
+
+uint16_t maxFpsForLedCount(uint16_t ledCount) {
+  const uint16_t clampedCount = effectiveLedCount(ledCount);
+  const uint16_t minFrameDelayMs = transportMinFrameDelayMs(clampedCount);
+  uint16_t maxByTransport = static_cast<uint16_t>(1000U / minFrameDelayMs);
+  if (maxByTransport < kMinFps) {
+    maxByTransport = kMinFps;
+  }
+  return maxByTransport > kMaxFps ? kMaxFps : maxByTransport;
 }
 
 void initializeEffectsIfNeeded() {
@@ -133,6 +162,10 @@ void initializeEffectsIfNeeded() {
 }
 
 EffectDescriptor *activeEffectOrFallback(uint8_t requestedId) {
+  if (effectsRegistryHead() == nullptr) {
+    return &g_directRgbFallback;
+  }
+
   EffectDescriptor *found = effectsFindById(requestedId);
   if (found != nullptr) {
     return found;
@@ -173,6 +206,7 @@ void effectsEngineTick() {
 
     g_lastFrameMs = now;
     g_lastFrameWasOff = true;
+    g_lastOutputWasBlack = true;
     fill_solid(g_leds, LED_STRIP_LENGTH, CRGB::Black);
     flushStrip(activeLedCount, 0);
     return;
@@ -186,13 +220,26 @@ void effectsEngineTick() {
     return;
   }
 
+  const uint32_t previousFrameMs = g_lastFrameMs;
   g_lastFrameMs = now;
   ++g_frame;
+  const uint32_t deltaMs = previousFrameMs == 0 ? 0 : (now - previousFrameMs);
   g_phase = static_cast<uint16_t>(g_phase + map(s.speed, 1, 255, 1, 7));
 
   EffectDescriptor *active = activeEffectOrFallback(s.pattern);
+  if (active != nullptr && active->effect != nullptr && g_lastActivePattern != active->id) {
+    if (g_lastActivePattern != 0xFF) {
+      EffectDescriptor *previous = activeEffectOrFallback(g_lastActivePattern);
+      if (previous != nullptr && previous->effect != nullptr) {
+        previous->effect->onDeactivate();
+      }
+    }
+    active->effect->onActivate(s);
+    g_lastActivePattern = active->id;
+  }
+
   if (active != nullptr && active->effect != nullptr) {
-    EffectContext ctx = {s, now, g_phase, g_frame};
+    EffectContext ctx = {s, now, deltaMs, g_phase, g_frame, activeLedCount};
     active->effect->render(ctx, g_leds, activeLedCount);
 
     if (activeLedCount < LED_STRIP_LENGTH) {
@@ -205,7 +252,13 @@ void effectsEngineTick() {
     }
   }
 
+  const bool frameIsBlack = isAllBlack(activeLedCount);
+  if (frameIsBlack && g_lastOutputWasBlack) {
+    return;
+  }
+
   flushStrip(activeLedCount, s.brightness);
+  g_lastOutputWasBlack = frameIsBlack;
 }
 
 LedEffectState effectsEngineGetState() {
@@ -220,7 +273,12 @@ void effectsEngineSetPower(bool on) {
 
 void effectsEngineSetPattern(uint8_t pattern) {
   LedEffectState s = snapshotState();
-  s.pattern = pattern;
+  if (effectsRegistryHead() == nullptr) {
+    s.pattern = kDirectRgbPatternId;
+  } else {
+    EffectDescriptor *found = effectsFindById(pattern);
+    s.pattern = (found != nullptr) ? pattern : effectsRegistryHead()->id;
+  }
   writeState(s);
 }
 
@@ -238,11 +296,12 @@ void effectsEngineSetSpeed(uint8_t speed) {
 
 void effectsEngineSetFps(uint16_t fps) {
   LedEffectState s = snapshotState();
-  if (fps < 15) {
-    fps = 15;
+  const uint16_t currentMax = maxFpsForLedCount(g_activeLedCount);
+  if (fps < kMinFps) {
+    fps = kMinFps;
   }
-  if (fps > 600) {
-    fps = 600;
+  if (fps > currentMax) {
+    fps = currentMax;
   }
   s.fps = fps;
   writeState(s);
@@ -264,6 +323,13 @@ void effectsEngineSetColor(uint8_t red, uint8_t green, uint8_t blue) {
 
 void effectsEngineSetActiveLedCount(uint16_t count) {
   g_activeLedCount = static_cast<uint16_t>(constrain(count, static_cast<uint16_t>(1), effectsEngineGetMaxLedCount()));
+
+  LedEffectState s = snapshotState();
+  const uint16_t newMaxFps = maxFpsForLedCount(g_activeLedCount);
+  if (s.fps > newMaxFps) {
+    s.fps = newMaxFps;
+    writeState(s);
+  }
 }
 
 uint16_t effectsEngineGetActiveLedCount() {
@@ -272,6 +338,109 @@ uint16_t effectsEngineGetActiveLedCount() {
 
 uint16_t effectsEngineGetMaxLedCount() {
   return effectiveLedCount(LED_STRIP_LENGTH);
+}
+
+uint16_t effectsEngineGetMaxFps() {
+  return maxFpsForLedCount(g_activeLedCount);
+}
+
+uint16_t effectsEngineGetMaxFpsForLedCount(uint16_t ledCount) {
+  return maxFpsForLedCount(ledCount);
+}
+
+String effectsEngineActiveSettingsSchemaJson() {
+  const LedEffectState s = snapshotState();
+  EffectDescriptor *active = activeEffectOrFallback(s.pattern);
+  if (active == nullptr || active->effect == nullptr) {
+    return "[]";
+  }
+  return active->effect->settingsSchemaJson();
+}
+
+String effectsEngineActiveSettingsStateJson() {
+  const LedEffectState s = snapshotState();
+  EffectDescriptor *active = activeEffectOrFallback(s.pattern);
+  if (active == nullptr || active->effect == nullptr) {
+    return "{}";
+  }
+  return active->effect->settingsStateJson();
+}
+
+bool effectsEngineSetActiveSetting(const String &key, const String &value) {
+  const LedEffectState s = snapshotState();
+  EffectDescriptor *active = activeEffectOrFallback(s.pattern);
+  if (active == nullptr || active->effect == nullptr) {
+    return false;
+  }
+  return active->effect->setSetting(key, value);
+}
+
+void effectsEngineResetActiveSettings() {
+  const LedEffectState s = snapshotState();
+  EffectDescriptor *active = activeEffectOrFallback(s.pattern);
+  if (active == nullptr || active->effect == nullptr) {
+    return;
+  }
+  active->effect->resetSettings();
+}
+
+bool effectsEngineSaveActivePreset(uint8_t slot) {
+  const LedEffectState s = snapshotState();
+  EffectDescriptor *active = activeEffectOrFallback(s.pattern);
+  if (active == nullptr || active->effect == nullptr) {
+    return false;
+  }
+  return active->effect->savePreset(slot);
+}
+
+bool effectsEngineLoadActivePreset(uint8_t slot) {
+  const LedEffectState s = snapshotState();
+  EffectDescriptor *active = activeEffectOrFallback(s.pattern);
+  if (active == nullptr || active->effect == nullptr) {
+    return false;
+  }
+  const bool loaded = active->effect->loadPreset(slot);
+  if (loaded) {
+    active->effect->onActivate(snapshotState());
+  }
+  return loaded;
+}
+
+String effectsEngineActivePresetNamesJson() {
+  const LedEffectState s = snapshotState();
+  EffectDescriptor *active = activeEffectOrFallback(s.pattern);
+  if (active == nullptr) {
+    return "[]";
+  }
+
+  String out = "[";
+  for (uint8_t slot = 1; slot <= 5; ++slot) {
+    if (slot > 1) {
+      out += ",";
+    }
+    String name = loadEffectPresetName(active->id, slot);
+    if (name.length() == 0) {
+      name = "Preset " + String(slot);
+    }
+    name.replace("\\", "\\\\");
+    name.replace("\"", "\\\"");
+
+    out += "{";
+    out += "\"slot\":" + String(slot);
+    out += ",\"name\":\"" + name + "\"";
+    out += "}";
+  }
+  out += "]";
+  return out;
+}
+
+bool effectsEngineSetActivePresetName(uint8_t slot, const String &name) {
+  const LedEffectState s = snapshotState();
+  EffectDescriptor *active = activeEffectOrFallback(s.pattern);
+  if (active == nullptr) {
+    return false;
+  }
+  return saveEffectPresetName(active->id, slot, name);
 }
 
 String effectsEngineStateJson() {
@@ -289,6 +458,7 @@ String effectsEngineStateJson() {
   out += ",\"brightness\":" + String(s.brightness);
   out += ",\"speed\":" + String(s.speed);
   out += ",\"fps\":" + String(s.fps);
+  out += ",\"fps_max\":" + String(effectsEngineGetMaxFps());
   out += ",\"dither\":";
   out += (s.dither ? "true" : "false");
   out += ",\"red\":" + String(s.red);
@@ -301,5 +471,8 @@ String effectsEngineStateJson() {
 }
 
 String effectsEngineCatalogJson() {
+  if (effectsCount() == 0) {
+    return "[{\"id\":0,\"name\":\"Direct RGB\"}]";
+  }
   return effectsCatalogJson();
 }

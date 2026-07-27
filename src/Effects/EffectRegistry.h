@@ -21,9 +21,17 @@ EffectDescriptor *effectsFindById(uint8_t id);
 uint8_t effectsCount();
 String effectsCatalogJson();
 
+#ifndef EFFECTS_ENABLE_REGISTRATION
+#define EFFECTS_ENABLE_REGISTRATION 1
+#endif
+
+#if EFFECTS_ENABLE_REGISTRATION
 #define REGISTER_EFFECT(CLASS_NAME, EFFECT_ID, EFFECT_LABEL) \
   namespace {                                                  \
   CLASS_NAME g_##CLASS_NAME##_instance;                        \
   EffectRegistrar g_##CLASS_NAME##_registrar(                 \
       static_cast<uint8_t>(EFFECT_ID), EFFECT_LABEL, &g_##CLASS_NAME##_instance); \
   }
+#else
+#define REGISTER_EFFECT(CLASS_NAME, EFFECT_ID, EFFECT_LABEL)
+#endif

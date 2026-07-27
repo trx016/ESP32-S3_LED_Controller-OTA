@@ -37,6 +37,31 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
       display: grid;
       gap: 14px;
     }
+    .topbar {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(28, 46, 40, 0.12);
+      border-radius: 14px;
+      padding: 10px;
+      backdrop-filter: blur(6px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .nav {
+      border: 1px solid rgba(28, 46, 40, 0.12);
+      border-radius: 10px;
+      padding: 8px 12px;
+      text-decoration: none;
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 13px;
+      background: #ffffff;
+    }
+    .nav.active {
+      border-color: rgba(15, 118, 110, 0.35);
+      background: rgba(15, 118, 110, 0.14);
+      color: #0f766e;
+    }
     .card {
       background: var(--card);
       border-radius: 16px;
@@ -132,6 +157,13 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
 </head>
 <body>
   <main class="wrap">
+    <nav class="topbar">
+      <a class="nav" href="/setup">Setup</a>
+      <a class="nav" href="/home">Home</a>
+      <a class="nav" href="/effects">Effects</a>
+      <a class="nav active" href="/settings">Settings</a>
+    </nav>
+
     <section class="card">
       <h1>Device Settings</h1>
       <p>Configure persistent behavior for this controller.</p>
@@ -164,10 +196,19 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
         <input class="numberInput" id="ledCount" type="number" min="1" step="1" />
       </div>
 
+      <div class="switchRow">
+        <div>
+          <div class="switchLabel">Global Effects FPS</div>
+          <div class="hint">Shared frame-rate cap applied to all effects.</div>
+        </div>
+        <input class="numberInput" id="effectsFps" type="number" min="15" step="1" />
+      </div>
+
       <div class="meta">
         <div>Current firmware: <strong id="otaCurrent">-</strong></div>
         <div>Latest release: <strong id="otaLatest">-</strong></div>
         <div>OTA status: <strong id="otaStatus">-</strong></div>
+        <div>Max effects FPS (current LEDs): <strong id="fpsMax">-</strong></div>
       </div>
 
       <div class="row">
@@ -183,37 +224,115 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
 
   <script>
     let latestConnected = false;
+    let lastStatusRaw = '';
+    let statusInFlight = false;
+
+    function setTextIfChanged(id, value) {
+      const el = document.getElementById(id);
+      if (el.textContent !== value) {
+        el.textContent = value;
+      }
+    }
+
+    function setCheckedIfChanged(id, checked) {
+      const el = document.getElementById(id);
+      if (el.checked !== checked) {
+        el.checked = checked;
+      }
+    }
+
+    function setValueIfChanged(id, value) {
+      const el = document.getElementById(id);
+      if (el.value !== value) {
+        el.value = value;
+      }
+    }
 
     function setWifiPill(connected) {
       const pill = document.getElementById('wifiPill');
-      pill.textContent = connected ? 'Wi-Fi: connected' : 'Wi-Fi: setup mode';
-      pill.className = connected ? 'pill ok' : 'pill';
+      const text = connected ? 'Wi-Fi: connected' : 'Wi-Fi: setup mode';
+      const cls = connected ? 'pill ok' : 'pill';
+      if (pill.textContent !== text) {
+        pill.textContent = text;
+      }
+      if (pill.className !== cls) {
+        pill.className = cls;
+      }
       document.getElementById('backBtn').setAttribute('href', connected ? '/home' : '/setup');
     }
 
     async function fetchStatus() {
-      const res = await fetch('/api/status');
-      const s = await res.json();
+      if (statusInFlight) {
+        return;
+      }
+
+      statusInFlight = true;
+      try {
+        const res = await fetch('/api/status');
+        const raw = await res.text();
+        if (!res.ok) {
+          return;
+        }
+
+        const s = JSON.parse(raw);
+        if (raw === lastStatusRaw) {
+          return;
+        }
+
+        lastStatusRaw = raw;
+
+        const autoOtaEl = document.getElementById('autoOta');
+        const internetEl = document.getElementById('internetEnabled');
+        const ledCountEl = document.getElementById('ledCount');
+        const effectsFpsEl = document.getElementById('effectsFps');
+        const editingControls =
+          document.activeElement === autoOtaEl ||
+          document.activeElement === internetEl ||
+          document.activeElement === ledCountEl ||
+          document.activeElement === effectsFpsEl;
+
       latestConnected = !!s.connected;
       setWifiPill(latestConnected);
-      document.getElementById('autoOta').checked = !!s.auto_ota;
-      document.getElementById('internetEnabled').checked = (s.internet_enabled !== false);
-      document.getElementById('ledCount').value = String(s.led_count || 1);
-      document.getElementById('ledCount').max = String(s.led_count_max || 1);
-      document.getElementById('otaCurrent').textContent = s.ota_current || '-';
-      document.getElementById('otaLatest').textContent = s.ota_latest || '-';
-      document.getElementById('otaStatus').textContent = s.ota_status || '-';
+
+        if (!editingControls) {
+          setCheckedIfChanged('autoOta', !!s.auto_ota);
+          setCheckedIfChanged('internetEnabled', (s.internet_enabled !== false));
+          setValueIfChanged('ledCount', String(s.led_count || 1));
+          setValueIfChanged('effectsFps', String(s.effects_fps || 15));
+        }
+
+        const ledCountMax = String(s.led_count_max || 1);
+        if (ledCountEl.max !== ledCountMax) {
+          ledCountEl.max = ledCountMax;
+        }
+
+        const fpsMax = String(s.effects_fps_max || 15);
+        if (effectsFpsEl.max !== fpsMax) {
+          effectsFpsEl.max = fpsMax;
+        }
+
+        setTextIfChanged('otaCurrent', s.ota_current || '-');
+        setTextIfChanged('otaLatest', s.ota_latest || '-');
+        setTextIfChanged('otaStatus', s.ota_status || '-');
+        setTextIfChanged('fpsMax', String(s.effects_fps_max || '-'));
 
       const installBtn = document.getElementById('installBtn');
       const manualMode = !s.auto_ota;
       const hasUpdate = !!s.ota_update_available;
-      installBtn.style.display = (manualMode && hasUpdate) ? 'inline-block' : 'none';
+        const nextDisplay = (manualMode && hasUpdate) ? 'inline-block' : 'none';
+        if (installBtn.style.display !== nextDisplay) {
+          installBtn.style.display = nextDisplay;
+        }
+      } finally {
+        statusInFlight = false;
+      }
     }
 
     async function saveSettings() {
       const otaEnabled = document.getElementById('autoOta').checked ? '1' : '0';
       const internetEnabled = document.getElementById('internetEnabled').checked ? '1' : '0';
       const ledCount = document.getElementById('ledCount').value || '1';
+      const effectsFps = document.getElementById('effectsFps').value || '15';
 
       const otaRes = await fetch('/api/settings/ota', {
         method: 'POST',
@@ -233,13 +352,20 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
         body: new URLSearchParams({ count: ledCount })
       });
 
+      const fpsRes = await fetch('/api/settings/effects-fps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ fps: effectsFps })
+      });
+
       const otaText = await otaRes.text();
       const internetText = await internetRes.text();
       const ledText = await ledRes.text();
+      const fpsText = await fpsRes.text();
       const msg = document.getElementById('msg');
-      msg.textContent = `${otaText} ${internetText} ${ledText}`;
+      msg.textContent = `${otaText} ${internetText} ${ledText} ${fpsText}`;
 
-      if (otaRes.ok && internetRes.ok && ledRes.ok) {
+      if (otaRes.ok && internetRes.ok && ledRes.ok && fpsRes.ok) {
         setWifiPill(latestConnected);
       }
 

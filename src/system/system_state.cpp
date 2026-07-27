@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 
+#include "../led/effects_engine.h"
 #include "ota_update.h"
 #include "serial_debug.h"
 #include "statusLED_functions.h"
@@ -14,7 +15,7 @@
 #endif
 
 #ifndef LED_TRANSPORT_MAX
-#define LED_TRANSPORT_MAX 256
+#define LED_TRANSPORT_MAX LED_STRIP_LENGTH
 #endif
 
 namespace {
@@ -41,6 +42,7 @@ bool mdnsStarted = false;
 bool autoOtaEnabled = false;
 bool internetEnabled = true;
 uint16_t ledCount = LED_STRIP_LENGTH;
+uint16_t effectsFps = 20;
 
 uint32_t nextInternetProbeMs = 0;
 uint32_t wifiConnectedBreathUntilMs = 0;
@@ -187,6 +189,8 @@ void loadSettings() {
   internetEnabled = preferences.getBool("internet_enabled", true);
   const uint32_t storedLedCount = preferences.getUInt("led_count", MAX_LED_COUNT);
   ledCount = static_cast<uint16_t>(constrain(storedLedCount, 1U, static_cast<uint32_t>(MAX_LED_COUNT)));
+  const uint32_t storedEffectsFps = preferences.getUInt("effects_fps", 20);
+  effectsFps = static_cast<uint16_t>(constrain(storedEffectsFps, 15U, static_cast<uint32_t>(effectsEngineGetMaxFpsForLedCount(ledCount))));
   preferences.end();
 }
 
@@ -427,6 +431,8 @@ String systemStateStatusJson() {
   json += "\"internet_enabled\":" + String(internetEnabled ? "true" : "false") + ",";
   json += "\"led_count\":" + String(ledCount) + ",";
   json += "\"led_count_max\":" + String(MAX_LED_COUNT) + ",";
+  json += "\"effects_fps\":" + String(effectsFps) + ",";
+  json += "\"effects_fps_max\":" + String(effectsEngineGetMaxFpsForLedCount(ledCount)) + ",";
   json += "\"ota_busy\":" + String(otaUpdateIsBusy() ? "true" : "false") + ",";
   json += "\"ota_update_available\":" + String(otaUpdateIsUpdateAvailable() ? "true" : "false") + ",";
   json += "\"ota_current\":\"" + otaUpdateGetCurrentVersion() + "\",";
@@ -477,15 +483,26 @@ bool systemStateIsInternetEnabled() {
 
 void systemStateSetLedCount(uint16_t count) {
   const uint16_t clamped = static_cast<uint16_t>(constrain(count, static_cast<uint16_t>(1), MAX_LED_COUNT));
-  if (ledCount == clamped) {
+  const uint16_t maxFps = effectsEngineGetMaxFpsForLedCount(clamped);
+
+  const bool ledCountChanged = ledCount != clamped;
+  const bool fpsNeedsClamp = effectsFps > maxFps;
+
+  if (!ledCountChanged && !fpsNeedsClamp) {
     return;
   }
 
-  preferences.begin("settings", false);
-  preferences.putUInt("led_count", clamped);
-  preferences.end();
-
   ledCount = clamped;
+  if (fpsNeedsClamp) {
+    effectsFps = maxFps;
+  }
+
+  preferences.begin("settings", false);
+  preferences.putUInt("led_count", ledCount);
+  if (fpsNeedsClamp) {
+    preferences.putUInt("effects_fps", effectsFps);
+  }
+  preferences.end();
 }
 
 uint16_t systemStateGetLedCount() {
@@ -493,7 +510,25 @@ uint16_t systemStateGetLedCount() {
 }
 
 uint16_t systemStateGetLedCountMax() {
-  return LED_STRIP_LENGTH;
+  return MAX_LED_COUNT;
+}
+
+void systemStateSetEffectsFps(uint16_t fps) {
+  const uint16_t maxFps = effectsEngineGetMaxFpsForLedCount(ledCount);
+  const uint16_t clamped = static_cast<uint16_t>(constrain(fps, static_cast<uint16_t>(15), maxFps));
+  if (effectsFps == clamped) {
+    return;
+  }
+
+  preferences.begin("settings", false);
+  preferences.putUInt("effects_fps", clamped);
+  preferences.end();
+
+  effectsFps = clamped;
+}
+
+uint16_t systemStateGetEffectsFps() {
+  return effectsFps;
 }
 
 void systemStateSaveWifiCredentials(const String &ssid, const String &pass) {

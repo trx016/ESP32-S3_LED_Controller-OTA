@@ -143,9 +143,28 @@ void handleLedCountSave() {
   systemStateSetLedCount(clamped);
 #if !defined(DEBUG_DISABLE_EFFECTS_INIT) || (DEBUG_DISABLE_EFFECTS_INIT == 0)
   effectsEngineSetActiveLedCount(clamped);
+  effectsEngineSetFps(systemStateGetEffectsFps());
 #endif
 
   g_server->send(200, "text/plain", "Active LED count updated.");
+}
+
+void handleEffectsFpsSave() {
+  if (!g_server->hasArg("fps")) {
+    g_server->send(400, "text/plain", "Missing effects FPS value");
+    return;
+  }
+
+  const int requested = g_server->arg("fps").toInt();
+  const uint16_t fpsMax = effectsEngineGetMaxFpsForLedCount(systemStateGetLedCount());
+  const uint16_t clamped = static_cast<uint16_t>(constrain(requested, 15, static_cast<int>(fpsMax)));
+
+  systemStateSetEffectsFps(clamped);
+#if !defined(DEBUG_DISABLE_EFFECTS_INIT) || (DEBUG_DISABLE_EFFECTS_INIT == 0)
+  effectsEngineSetFps(clamped);
+#endif
+
+  g_server->send(200, "text/plain", "Global effects FPS updated.");
 }
 
 void handleOtaCheckNow() {
@@ -205,6 +224,106 @@ void handleEffectsCatalog() {
   g_server->send(200, "application/json", effectsEngineCatalogJson());
 }
 
+void handleEffectsActiveSettingsSchema() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "application/json", "[]");
+  return;
+#endif
+
+  g_server->send(200, "application/json", effectsEngineActiveSettingsSchemaJson());
+}
+
+void handleEffectsActiveSettingsState() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "application/json", "{}");
+  return;
+#endif
+
+  g_server->send(200, "application/json", effectsEngineActiveSettingsStateJson());
+}
+
+void handleEffectsActiveSettingSet() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "text/plain", "Effects runtime temporarily disabled for crash isolation.");
+  return;
+#endif
+
+  if (!g_server->hasArg("key") || !g_server->hasArg("value")) {
+    g_server->send(400, "text/plain", "Missing key or value");
+    return;
+  }
+
+  const bool ok = effectsEngineSetActiveSetting(g_server->arg("key"), g_server->arg("value"));
+  g_server->send(ok ? 200 : 400, "text/plain", ok ? "Effect setting applied." : "Invalid effect setting.");
+}
+
+void handleEffectsActiveSettingsReset() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "text/plain", "Effects runtime temporarily disabled for crash isolation.");
+  return;
+#endif
+
+  effectsEngineResetActiveSettings();
+  g_server->send(200, "text/plain", "Effect settings reset.");
+}
+
+void handleEffectsActivePresetSave() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "text/plain", "Effects runtime temporarily disabled for crash isolation.");
+  return;
+#endif
+
+  if (!g_server->hasArg("slot")) {
+    g_server->send(400, "text/plain", "Missing preset slot");
+    return;
+  }
+
+  const int slot = g_server->arg("slot").toInt();
+  const bool ok = effectsEngineSaveActivePreset(static_cast<uint8_t>(constrain(slot, 1, 5)));
+  g_server->send(ok ? 200 : 400, "text/plain", ok ? "Preset saved." : "Invalid preset slot.");
+}
+
+void handleEffectsActivePresetLoad() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "text/plain", "Effects runtime temporarily disabled for crash isolation.");
+  return;
+#endif
+
+  if (!g_server->hasArg("slot")) {
+    g_server->send(400, "text/plain", "Missing preset slot");
+    return;
+  }
+
+  const int slot = g_server->arg("slot").toInt();
+  const bool ok = effectsEngineLoadActivePreset(static_cast<uint8_t>(constrain(slot, 1, 5)));
+  g_server->send(ok ? 200 : 400, "text/plain", ok ? "Preset loaded." : "Invalid preset slot.");
+}
+
+void handleEffectsActivePresetNames() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "application/json", "[]");
+  return;
+#endif
+
+  g_server->send(200, "application/json", effectsEngineActivePresetNamesJson());
+}
+
+void handleEffectsActivePresetRename() {
+#if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
+  g_server->send(503, "text/plain", "Effects runtime temporarily disabled for crash isolation.");
+  return;
+#endif
+
+  if (!g_server->hasArg("slot") || !g_server->hasArg("name")) {
+    g_server->send(400, "text/plain", "Missing slot or name");
+    return;
+  }
+
+  const int slot = g_server->arg("slot").toInt();
+  const bool ok = effectsEngineSetActivePresetName(static_cast<uint8_t>(constrain(slot, 1, 5)), g_server->arg("name"));
+  g_server->send(ok ? 200 : 400, "text/plain", ok ? "Preset renamed." : "Invalid preset name.");
+}
+
 void handleEffectsSet() {
 #if defined(DEBUG_DISABLE_EFFECTS_INIT) && (DEBUG_DISABLE_EFFECTS_INIT == 1)
   g_server->send(503, "text/plain", "Effects runtime temporarily disabled for crash isolation.");
@@ -226,11 +345,6 @@ void handleEffectsSet() {
   if (g_server->hasArg("speed")) {
     const int speed = g_server->arg("speed").toInt();
     effectsEngineSetSpeed(static_cast<uint8_t>(constrain(speed, 1, 255)));
-  }
-
-  if (g_server->hasArg("fps")) {
-    const int fps = g_server->arg("fps").toInt();
-    effectsEngineSetFps(static_cast<uint16_t>(constrain(fps, 15, 600)));
   }
 
   if (g_server->hasArg("dither")) {
@@ -273,11 +387,20 @@ void setupWebRoutes(WebServer &server) {
   server.on("/api/settings/ota", HTTP_POST, handleOtaSettingSave);
   server.on("/api/settings/internet", HTTP_POST, handleInternetSettingSave);
   server.on("/api/settings/leds", HTTP_POST, handleLedCountSave);
+  server.on("/api/settings/effects-fps", HTTP_POST, handleEffectsFpsSave);
   server.on("/api/ota/check", HTTP_POST, handleOtaCheckNow);
   server.on("/api/ota/install", HTTP_POST, handleOtaInstallNow);
   server.on("/api/effects/state", HTTP_GET, handleEffectsState);
   server.on("/api/effects/catalog", HTTP_GET, handleEffectsCatalog);
   server.on("/api/effects/set", HTTP_POST, handleEffectsSet);
+  server.on("/api/effects/active/settings/schema", HTTP_GET, handleEffectsActiveSettingsSchema);
+  server.on("/api/effects/active/settings/state", HTTP_GET, handleEffectsActiveSettingsState);
+  server.on("/api/effects/active/settings/set", HTTP_POST, handleEffectsActiveSettingSet);
+  server.on("/api/effects/active/settings/reset", HTTP_POST, handleEffectsActiveSettingsReset);
+  server.on("/api/effects/active/preset/save", HTTP_POST, handleEffectsActivePresetSave);
+  server.on("/api/effects/active/preset/load", HTTP_POST, handleEffectsActivePresetLoad);
+  server.on("/api/effects/active/preset/names", HTTP_GET, handleEffectsActivePresetNames);
+  server.on("/api/effects/active/preset/rename", HTTP_POST, handleEffectsActivePresetRename);
   server.on("/api/restart", HTTP_POST, handleRestart);
 
   server.onNotFound([]() { sendPortalRedirect(isSetupStage() ? "/setup" : "/"); });

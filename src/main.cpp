@@ -29,6 +29,7 @@ void setup() {
 
   systemStateBegin();
   effectsEngineSetActiveLedCount(systemStateGetLedCount());
+  effectsEngineSetFps(systemStateGetEffectsFps());
   effectsEngineBegin();
   otaUpdateBegin();
   systemStateStartAccessPoint(dnsServer);

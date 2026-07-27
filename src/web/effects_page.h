@@ -30,6 +30,31 @@ const char EFFECTS_PAGE_HTML[] PROGMEM = R"HTML(
       padding: 18px;
     }
     .shell { width: min(900px, 100%); margin: 0 auto; display: grid; gap: 14px; }
+    .topbar {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(18, 33, 47, 0.12);
+      border-radius: 14px;
+      padding: 10px;
+      backdrop-filter: blur(6px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .nav {
+      border: 1px solid rgba(18, 33, 47, 0.12);
+      border-radius: 10px;
+      padding: 8px 12px;
+      text-decoration: none;
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 13px;
+      background: #ffffff;
+    }
+    .nav.active {
+      border-color: rgba(194, 65, 12, 0.35);
+      background: rgba(194, 65, 12, 0.14);
+      color: #9a3412;
+    }
     .card {
       background: var(--card);
       border-radius: 14px;
@@ -75,6 +100,14 @@ const char EFFECTS_PAGE_HTML[] PROGMEM = R"HTML(
       background: #fbfdff;
     }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .preset-row {
+      display: grid;
+      grid-template-columns: 150px 1fr 1fr;
+      gap: 8px;
+      align-items: center;
+      margin-top: 12px;
+    }
+    @media (max-width: 760px) { .preset-row { grid-template-columns: 1fr; } }
     .btn {
       border: 0;
       border-radius: 10px;
@@ -85,14 +118,49 @@ const char EFFECTS_PAGE_HTML[] PROGMEM = R"HTML(
       background: linear-gradient(120deg, var(--accent), #ea580c);
     }
     .btn.alt { background: linear-gradient(120deg, var(--accent-2), #0284c7); }
+    .effect-settings {
+      margin-top: 14px;
+      border-top: 1px solid rgba(18,33,47,.12);
+      padding-top: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .toast {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      background: #0f172a;
+      color: #f8fafc;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 10px 24px rgba(2, 6, 23, 0.35);
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity .18s ease, transform .18s ease;
+      z-index: 40;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
     .msg { min-height: 18px; margin-top: 8px; color: #1d4ed8; font-weight: 600; font-size: 13px; }
   </style>
 </head>
 <body>
   <main class="shell">
+    <nav class="topbar">
+      <a class="nav" href="/setup">Setup</a>
+      <a class="nav" href="/home">Home</a>
+      <a class="nav active" href="/effects">Effects</a>
+      <a class="nav" href="/settings">Settings</a>
+    </nav>
+
     <section class="card">
       <h1>Effects Control</h1>
-      <p class="muted">Rendering runs on LED core. Web controls queue updates from the web core.</p>
+      <p class="muted">Global controls stay fixed. Effect-specific controls are generated from each effect module.</p>
       <div style="margin-top:10px"><span class="chip" id="frameChip">-</span></div>
 
       <div class="grid">
@@ -111,16 +179,6 @@ const char EFFECTS_PAGE_HTML[] PROGMEM = R"HTML(
           <input id="speed" type="range" min="1" max="255" step="1" />
         </div>
 
-        <div>
-          <label for="fps">Target FPS</label>
-          <input id="fps" type="number" min="15" max="600" step="1" />
-        </div>
-
-        <div>
-          <label for="solidColor">Solid Color</label>
-          <input id="solidColor" type="color" value="#ffa030" />
-        </div>
-
         <div class="switch">
           <span>Dither</span>
           <input id="dither" type="checkbox" />
@@ -132,28 +190,62 @@ const char EFFECTS_PAGE_HTML[] PROGMEM = R"HTML(
         </div>
       </div>
 
+      <div class="effect-settings" id="effectSettingsWrap">
+        <h3 style="margin:0">Effect Settings</h3>
+        <div id="effectSettingsGrid" class="grid"></div>
+      </div>
+
+      <div class="preset-row">
+        <select id="presetSlot"></select>
+        <button class="btn alt" onclick="loadPreset()">Load Preset</button>
+        <button class="btn alt" onclick="savePreset()">Save Preset</button>
+      </div>
+      <div class="preset-row" style="margin-top:8px">
+        <input id="presetName" type="text" maxlength="24" placeholder="Preset name" />
+        <button class="btn alt" onclick="renamePreset()">Rename Preset</button>
+        <button class="btn" onclick="resetEffectSettings()">Reset Effect Settings</button>
+      </div>
+
       <div class="actions">
-        <button class="btn" onclick="saveEffects()">Apply Effects Settings</button>
         <button class="btn alt" onclick="reloadState()">Refresh</button>
         <a class="btn alt" href="/home" style="text-decoration:none;display:inline-block">Back Home</a>
       </div>
       <p class="msg" id="msg"></p>
     </section>
   </main>
+  <div id="toast" class="toast"></div>
 
   <script>
-    function hexToRgb(hex) {
-      const v = hex.replace('#', '');
-      return {
-        r: parseInt(v.substring(0, 2), 16),
-        g: parseInt(v.substring(2, 4), 16),
-        b: parseInt(v.substring(4, 6), 16)
-      };
+    let lastStateRaw = '';
+    let lastSchemaRaw = '';
+    let lastEffectSettingsRaw = '';
+    let activePattern = -1;
+    let stateInFlight = false;
+    let settingsInFlight = false;
+    let catalogReady = false;
+    let globalApplyTimer = null;
+    let toastTimer = null;
+    const effectSettingTimers = {};
+
+    function setTextIfChanged(id, value) {
+      const el = document.getElementById(id);
+      if (el.textContent !== value) {
+        el.textContent = value;
+      }
     }
 
-    function rgbToHex(r, g, b) {
-      const p = (n) => n.toString(16).padStart(2, '0');
-      return `#${p(r)}${p(g)}${p(b)}`;
+    function setValueIfChanged(id, value) {
+      const el = document.getElementById(id);
+      if (el.value !== value) {
+        el.value = value;
+      }
+    }
+
+    function setCheckedIfChanged(id, checked) {
+      const el = document.getElementById(id);
+      if (el.checked !== checked) {
+        el.checked = checked;
+      }
     }
 
     function sliderToBrightness(sliderValue) {
@@ -184,27 +276,142 @@ const char EFFECTS_PAGE_HTML[] PROGMEM = R"HTML(
       document.getElementById('brightnessVal').textContent = String(brightness);
     }
 
+    function setMsg(text) {
+      document.getElementById('msg').textContent = text;
+    }
+
+    function showToast(text) {
+      const toast = document.getElementById('toast');
+      toast.textContent = text;
+      toast.classList.add('show');
+      if (toastTimer !== null) {
+        clearTimeout(toastTimer);
+      }
+      toastTimer = setTimeout(() => {
+        toast.classList.remove('show');
+      }, 1400);
+    }
+
+    function getDynamicControlIds() {
+      return Array.from(document.querySelectorAll('[data-setting-key]')).map((el) => el.id);
+    }
+
+    function scheduleGlobalApply(delayMs) {
+      if (globalApplyTimer !== null) {
+        clearTimeout(globalApplyTimer);
+      }
+      globalApplyTimer = setTimeout(() => {
+        globalApplyTimer = null;
+        saveGlobalEffects(false, true);
+      }, delayMs);
+    }
+
+    function scheduleEffectSetting(key, value, delayMs) {
+      if (effectSettingTimers[key]) {
+        clearTimeout(effectSettingTimers[key]);
+      }
+      effectSettingTimers[key] = setTimeout(() => {
+        delete effectSettingTimers[key];
+        applyEffectSetting(key, value, true);
+      }, delayMs);
+    }
+
+    async function reloadPresetNames() {
+      const res = await fetch('/api/effects/active/preset/names');
+      const raw = await res.text();
+      if (!res.ok) {
+        return;
+      }
+
+      const names = JSON.parse(raw || '[]');
+      const select = document.getElementById('presetSlot');
+      const current = select.value || '1';
+      select.innerHTML = '';
+
+      for (const item of names) {
+        const opt = document.createElement('option');
+        opt.value = String(item.slot);
+        opt.textContent = String(item.name || ('Preset ' + item.slot));
+        select.appendChild(opt);
+      }
+
+      if (Array.from(select.options).some((o) => o.value === current)) {
+        select.value = current;
+      }
+      updatePresetNameInput();
+    }
+
+    function updatePresetNameInput() {
+      const select = document.getElementById('presetSlot');
+      const nameInput = document.getElementById('presetName');
+      const selected = select.options[select.selectedIndex];
+      nameInput.value = selected ? selected.textContent : '';
+    }
+
     async function reloadState() {
-      await ensurePatternCatalog();
-      const r = await fetch('/api/effects/state');
-      const s = await r.json();
+      if (stateInFlight) {
+        return;
+      }
 
-      document.getElementById('pattern').value = String(s.pattern ?? 0);
-      document.getElementById('brightness').value = String(brightnessToSlider(s.brightness ?? 96));
-      document.getElementById('speed').value = String(s.speed ?? 128);
-      document.getElementById('fps').value = String(s.fps ?? 120);
-      document.getElementById('dither').checked = !!s.dither;
-      document.getElementById('power').checked = !!s.power;
-      document.getElementById('solidColor').value = rgbToHex(s.red ?? 255, s.green ?? 160, s.blue ?? 48);
+      stateInFlight = true;
+      try {
+        await ensurePatternCatalog();
+        const r = await fetch('/api/effects/state');
+        const raw = await r.text();
+        if (!r.ok) {
+          setMsg(raw || 'Failed to read effects state.');
+          return;
+        }
 
-      updateBrightnessLabel();
-      document.getElementById('speedVal').textContent = String(s.speed ?? 0);
-      document.getElementById('frameChip').textContent = `FPS ${s.fps ?? '-'} | Dither ${s.dither ? 'on' : 'off'} | Pattern ${s.pattern_name || s.pattern || '-'} | LEDs ${s.active_leds ?? '-'} / ${s.max_leds ?? '-'}`;
+        if (raw === lastStateRaw) {
+          await reloadEffectSettingsState(false);
+          return;
+        }
+
+        const s = JSON.parse(raw);
+        const dynamicIds = getDynamicControlIds();
+        const editingControls =
+          document.activeElement === document.getElementById('pattern') ||
+          document.activeElement === document.getElementById('brightness') ||
+          document.activeElement === document.getElementById('speed') ||
+          document.activeElement === document.getElementById('dither') ||
+          document.activeElement === document.getElementById('power') ||
+          dynamicIds.includes(document.activeElement ? document.activeElement.id : '');
+
+        if (!editingControls) {
+          setValueIfChanged('pattern', String(s.pattern ?? 0));
+          setValueIfChanged('brightness', String(brightnessToSlider(s.brightness ?? 96)));
+          setValueIfChanged('speed', String(s.speed ?? 128));
+          setCheckedIfChanged('dither', !!s.dither);
+          setCheckedIfChanged('power', !!s.power);
+
+          updateBrightnessLabel();
+          setTextIfChanged('speedVal', String(s.speed ?? 0));
+        }
+
+        setTextIfChanged('frameChip', `FPS ${s.fps ?? '-'} | Dither ${s.dither ? 'on' : 'off'} | Pattern ${s.pattern_name || s.pattern || '-'} | LEDs ${s.active_leds ?? '-'} / ${s.max_leds ?? '-'}`);
+
+        if (activePattern !== Number(s.pattern ?? 0)) {
+          activePattern = Number(s.pattern ?? 0);
+          await reloadEffectSchema(true);
+          await reloadPresetNames();
+        }
+
+        lastStateRaw = raw;
+        await reloadEffectSettingsState(false);
+      } finally {
+        stateInFlight = false;
+      }
     }
 
     async function ensurePatternCatalog() {
+      if (catalogReady) {
+        return;
+      }
+
       const select = document.getElementById('pattern');
       if (select.options.length > 0) {
+        catalogReady = true;
         return;
       }
 
@@ -218,21 +425,200 @@ const char EFFECTS_PAGE_HTML[] PROGMEM = R"HTML(
         opt.textContent = item.name;
         select.appendChild(opt);
       }
+
+      catalogReady = true;
     }
 
-    async function saveEffects() {
-      const color = hexToRgb(document.getElementById('solidColor').value);
+    function renderSettingControl(def, value) {
+      const key = String(def.key || '');
+      const type = String(def.type || 'slider').toLowerCase();
+
+      const wrap = document.createElement('div');
+      const label = document.createElement('label');
+      label.setAttribute('for', `efx_${key}`);
+      label.textContent = String(def.label || key);
+      wrap.appendChild(label);
+
+      if (type === 'toggle') {
+        const holder = document.createElement('div');
+        holder.className = 'switch';
+        const left = document.createElement('span');
+        left.textContent = String(def.label || key);
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = `efx_${key}`;
+        input.dataset.settingKey = key;
+        input.checked = !!value;
+        input.addEventListener('change', () => applyEffectSetting(key, input.checked ? '1' : '0'));
+        holder.innerHTML = '';
+        holder.appendChild(left);
+        holder.appendChild(input);
+        wrap.innerHTML = '';
+        wrap.appendChild(holder);
+        return wrap;
+      }
+
+      if (type === 'dropdown' || type === 'dlist' || type === 'select') {
+        const select = document.createElement('select');
+        select.id = `efx_${key}`;
+        select.dataset.settingKey = key;
+        const opts = Array.isArray(def.options) ? def.options : [];
+        for (const o of opts) {
+          const opt = document.createElement('option');
+          if (typeof o === 'object' && o !== null) {
+            opt.value = String(o.value ?? '');
+            opt.textContent = String(o.label ?? o.value ?? '');
+          } else {
+            opt.value = String(o);
+            opt.textContent = String(o);
+          }
+          select.appendChild(opt);
+        }
+        select.value = String(value ?? '');
+        select.addEventListener('change', () => applyEffectSetting(key, select.value));
+        wrap.appendChild(select);
+        return wrap;
+      }
+
+      const min = Number(def.min ?? 0);
+      const max = Number(def.max ?? 255);
+      const step = Number(def.step ?? 1);
+      const row = document.createElement('div');
+      row.className = 'row';
+
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.id = `efx_${key}`;
+      input.dataset.settingKey = key;
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(step);
+      input.value = String(value ?? min);
+
+      const out = document.createElement('span');
+      out.id = `efx_${key}_val`;
+      out.textContent = String(input.value);
+
+      input.addEventListener('input', () => {
+        out.textContent = input.value;
+        scheduleEffectSetting(key, input.value, 80);
+      });
+      input.addEventListener('change', () => {
+        scheduleEffectSetting(key, input.value, 0);
+      });
+
+      row.appendChild(input);
+      row.appendChild(out);
+      wrap.appendChild(row);
+      return wrap;
+    }
+
+    async function reloadEffectSchema(force) {
+      if (settingsInFlight) {
+        return;
+      }
+
+      settingsInFlight = true;
+      try {
+        const r = await fetch('/api/effects/active/settings/schema');
+        const raw = await r.text();
+        if (!r.ok) {
+          setMsg(raw || 'Failed to load effect schema.');
+          return;
+        }
+
+        if (!force && raw === lastSchemaRaw) {
+          return;
+        }
+
+        const schema = JSON.parse(raw);
+        const stateRes = await fetch('/api/effects/active/settings/state');
+        const stateRaw = await stateRes.text();
+        const state = stateRes.ok ? JSON.parse(stateRaw || '{}') : {};
+
+        const grid = document.getElementById('effectSettingsGrid');
+        grid.innerHTML = '';
+
+        for (const def of schema) {
+          const key = String(def.key || '');
+          if (!key) {
+            continue;
+          }
+          grid.appendChild(renderSettingControl(def, state[key]));
+        }
+
+        lastSchemaRaw = raw;
+        lastEffectSettingsRaw = stateRaw;
+      } finally {
+        settingsInFlight = false;
+      }
+    }
+
+    async function reloadEffectSettingsState(force) {
+      const r = await fetch('/api/effects/active/settings/state');
+      const raw = await r.text();
+      if (!r.ok) {
+        return;
+      }
+
+      if (!force && raw === lastEffectSettingsRaw) {
+        return;
+      }
+
+      const state = JSON.parse(raw || '{}');
+      const controls = document.querySelectorAll('[data-setting-key]');
+      for (const el of controls) {
+        const key = el.dataset.settingKey;
+        if (!(key in state)) {
+          continue;
+        }
+
+        if (document.activeElement === el) {
+          continue;
+        }
+
+        const v = state[key];
+        if (el.type === 'checkbox') {
+          if (el.checked !== !!v) {
+            el.checked = !!v;
+          }
+        } else if (String(el.value) !== String(v)) {
+          el.value = String(v);
+          const out = document.getElementById(el.id + '_val');
+          if (out) {
+            out.textContent = String(v);
+          }
+        }
+      }
+
+      lastEffectSettingsRaw = raw;
+    }
+
+    async function applyEffectSetting(key, value, silent) {
+      const body = new URLSearchParams({ key: String(key), value: String(value) });
+      const res = await fetch('/api/effects/active/settings/set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+      });
+
+      const message = await res.text();
+      if (!silent) {
+        setMsg(message);
+        await reloadEffectSettingsState(true);
+        await reloadState();
+        showToast(message);
+      }
+    }
+
+    async function saveGlobalEffects(refreshSchema, silent) {
       const brightness = sliderToBrightness(document.getElementById('brightness').value);
       const body = new URLSearchParams({
         pattern: document.getElementById('pattern').value,
         brightness: String(brightness),
         speed: document.getElementById('speed').value,
-        fps: document.getElementById('fps').value,
         dither: document.getElementById('dither').checked ? '1' : '0',
-        power: document.getElementById('power').checked ? '1' : '0',
-        red: String(color.r),
-        green: String(color.g),
-        blue: String(color.b)
+        power: document.getElementById('power').checked ? '1' : '0'
       });
 
       const res = await fetch('/api/effects/set', {
@@ -241,20 +627,109 @@ const char EFFECTS_PAGE_HTML[] PROGMEM = R"HTML(
         body
       });
 
-      const msg = document.getElementById('msg');
-      msg.textContent = await res.text();
-      reloadState();
+      const message = await res.text();
+      if (!silent) {
+        setMsg(message);
+        showToast(message);
+      }
+      await reloadState();
+      if (refreshSchema) {
+        await reloadEffectSchema(true);
+        await reloadPresetNames();
+      }
+    }
+
+    async function savePreset() {
+      const body = new URLSearchParams({ slot: document.getElementById('presetSlot').value });
+      const res = await fetch('/api/effects/active/preset/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+      });
+      const message = await res.text();
+      setMsg(message);
+      showToast(message);
+    }
+
+    async function loadPreset() {
+      const body = new URLSearchParams({ slot: document.getElementById('presetSlot').value });
+      const res = await fetch('/api/effects/active/preset/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+      });
+      const message = await res.text();
+      setMsg(message);
+      showToast(message);
+      await reloadEffectSettingsState(true);
+      await reloadState();
+    }
+
+    async function renamePreset() {
+      const slot = document.getElementById('presetSlot').value;
+      const name = document.getElementById('presetName').value.trim();
+      if (!name) {
+        setMsg('Preset name cannot be empty.');
+        showToast('Preset name cannot be empty.');
+        return;
+      }
+
+      const body = new URLSearchParams({ slot, name });
+      const res = await fetch('/api/effects/active/preset/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+      });
+      const message = await res.text();
+      setMsg(message);
+      showToast(message);
+      await reloadPresetNames();
+      document.getElementById('presetSlot').value = String(slot);
+      updatePresetNameInput();
+    }
+
+    async function resetEffectSettings() {
+      const res = await fetch('/api/effects/active/settings/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: ''
+      });
+      const message = await res.text();
+      setMsg(message);
+      showToast(message);
+      await reloadEffectSettingsState(true);
+      await reloadState();
     }
 
     document.getElementById('brightness').addEventListener('input', (e) => {
       updateBrightnessLabel();
+      scheduleGlobalApply(80);
     });
 
     document.getElementById('speed').addEventListener('input', (e) => {
       document.getElementById('speedVal').textContent = e.target.value;
+      scheduleGlobalApply(80);
+    });
+
+    document.getElementById('pattern').addEventListener('change', async () => {
+      await saveGlobalEffects(true, false);
+    });
+
+    document.getElementById('presetSlot').addEventListener('change', () => {
+      updatePresetNameInput();
+    });
+
+    document.getElementById('dither').addEventListener('change', async () => {
+      await saveGlobalEffects(false, true);
+    });
+
+    document.getElementById('power').addEventListener('change', async () => {
+      await saveGlobalEffects(false, true);
     });
 
     reloadState();
+    reloadEffectSchema(true);
+    reloadPresetNames();
     setInterval(reloadState, 3000);
   </script>
 </body>

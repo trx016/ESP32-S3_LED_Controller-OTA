@@ -37,6 +37,31 @@ const char HOME_PAGE_HTML[] PROGMEM = R"HTML(
       display: grid;
       gap: 14px;
     }
+    .topbar {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(19, 33, 49, 0.10);
+      border-radius: 14px;
+      padding: 10px;
+      backdrop-filter: blur(6px);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .nav {
+      border: 1px solid rgba(19, 33, 49, 0.10);
+      border-radius: 10px;
+      padding: 8px 12px;
+      text-decoration: none;
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 13px;
+      background: #ffffff;
+    }
+    .nav.active {
+      border-color: rgba(2, 132, 199, 0.35);
+      background: rgba(2, 132, 199, 0.14);
+      color: #075985;
+    }
     .card {
       background: var(--card);
       border-radius: 16px;
@@ -121,6 +146,13 @@ const char HOME_PAGE_HTML[] PROGMEM = R"HTML(
 </head>
 <body>
   <main class="shell">
+    <nav class="topbar">
+      <a class="nav" href="/setup">Setup</a>
+      <a class="nav active" href="/home">Home</a>
+      <a class="nav" href="/effects">Effects</a>
+      <a class="nav" href="/settings">Settings</a>
+    </nav>
+
     <section class="card">
       <h1>LED Controller Home</h1>
       <p>Device is connected. This page is shown during normal operation.</p>
@@ -149,29 +181,64 @@ const char HOME_PAGE_HTML[] PROGMEM = R"HTML(
   </main>
 
   <script>
+    let lastStatusRaw = '';
+    let refreshInFlight = false;
+
+    function setTextIfChanged(id, value) {
+      const el = document.getElementById(id);
+      if (el.textContent !== value) {
+        el.textContent = value;
+      }
+    }
+
     function setPill(id, label, ok) {
       const el = document.getElementById(id);
-      el.textContent = label;
-      el.className = ok ? 'pill ok' : 'pill warn';
+      const nextClass = ok ? 'pill ok' : 'pill warn';
+      if (el.textContent !== label) {
+        el.textContent = label;
+      }
+      if (el.className !== nextClass) {
+        el.className = nextClass;
+      }
     }
 
     async function refreshStatus() {
-      const res = await fetch('/api/status');
-      const s = await res.json();
-
-      if (!s.connected) {
-        window.location.href = '/setup';
+      if (refreshInFlight) {
         return;
       }
 
-      document.getElementById('deviceName').textContent = s.device_name || 'Device';
-      document.getElementById('mode').textContent = s.mode || '-';
-      document.getElementById('ssid').textContent = s.ssid || '(not set)';
-      document.getElementById('lanIp').textContent = s.sta_ip || '-';
-      document.getElementById('statusLed').textContent = s.status_led || '-';
+      refreshInFlight = true;
+      try {
+        const res = await fetch('/api/status');
+        const raw = await res.text();
+        if (!res.ok) {
+          return;
+        }
 
-      setPill('wifiPill', s.connected ? 'Wi-Fi: connected' : 'Wi-Fi: offline', !!s.connected);
-      setPill('netPill', s.internet ? 'Internet: online' : 'Internet: offline', !!s.internet);
+        const s = JSON.parse(raw);
+
+        if (!s.connected) {
+          window.location.href = '/setup';
+          return;
+        }
+
+        if (raw === lastStatusRaw) {
+          return;
+        }
+
+        lastStatusRaw = raw;
+
+        setTextIfChanged('deviceName', s.device_name || 'Device');
+        setTextIfChanged('mode', s.mode || '-');
+        setTextIfChanged('ssid', s.ssid || '(not set)');
+        setTextIfChanged('lanIp', s.sta_ip || '-');
+        setTextIfChanged('statusLed', s.status_led || '-');
+
+        setPill('wifiPill', s.connected ? 'Wi-Fi: connected' : 'Wi-Fi: offline', !!s.connected);
+        setPill('netPill', s.internet ? 'Internet: online' : 'Internet: offline', !!s.internet);
+      } finally {
+        refreshInFlight = false;
+      }
     }
 
     async function reboot() {
