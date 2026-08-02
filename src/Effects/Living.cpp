@@ -109,8 +109,8 @@ class LivingEffect : public IEffect {
     frame_count = 0;
   }
 
-  void render(const EffectContext &ctx, CRGB *leds) override {
-    uint16_t led_count = ctx.layout.getLedCount();
+  void render(const EffectContext &ctx, CRGB *leds, uint16_t count) override {
+    uint16_t led_count = count;
     if (heat_buffer.size() != led_count) {
       heat_buffer.assign(led_count, 0);
     }
@@ -155,7 +155,7 @@ class LivingEffect : public IEffect {
         }
 
         base.nscale8(level);
-        base.nscale8((uint8_t)(ctx.brightnessNorm * 255.0f));
+        base.nscale8(ctx.state.brightness);
         leds[i] = base;
       } else {
         leds[i] = CRGB::Black;
