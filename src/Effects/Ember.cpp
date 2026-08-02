@@ -59,12 +59,16 @@ class EmberEffect : public IEffect {
     (void)leds;
     particles_.clear();
     heatBuffer_.assign(count, 0);
+    prevHeatBuffer_.assign(count, 0);
     frameCount_ = 0;
   }
 
   void render(const EffectContext &ctx, CRGB *leds, uint16_t count) override {
     if (heatBuffer_.size() != count) {
       heatBuffer_.assign(count, 0);
+    }
+    if (prevHeatBuffer_.size() != count) {
+      prevHeatBuffer_.assign(count, 0);
     }
     std::fill(heatBuffer_.begin(), heatBuffer_.end(), 0);
 
@@ -75,13 +79,14 @@ class EmberEffect : public IEffect {
     const int requestedParticles = static_cast<int>(settings_.seeds);
     const int largeStripCap = std::max(96, static_cast<int>(count) / 6);
     const int targetParticles = std::max(1, std::min(largeStripCap, requestedParticles));
-    const int spawnEvery = std::max(1, static_cast<int>(roundf(10.0f - (settings_.delay / 12.0f))));
+    const int baseSpawnEvery = std::max(1, static_cast<int>(roundf(10.0f - (settings_.delay / 12.0f))));
+    const int spawnEvery = std::max(1, static_cast<int>(roundf(baseSpawnEvery / std::max(0.35f, speedScale))));
 
     if ((frameCount_ % static_cast<uint32_t>(spawnEvery)) == 0) {
       const int deficit = std::max(0, targetParticles - static_cast<int>(particles_.size()));
       const int spawnBatch = std::min(12, std::max(1, 1 + (deficit / 20)));
       for (int i = 0; i < spawnBatch; ++i) {
-        spawnParticle(count, targetParticles);
+        spawnParticle(count, targetParticles, false);
       }
     }
 
@@ -94,6 +99,15 @@ class EmberEffect : public IEffect {
     }
     particles_.swap(updated);
 
+    // Refill immediately after die-off instead of waiting for the next spawn tick.
+    if (static_cast<int>(particles_.size()) < targetParticles) {
+      const int deficit = targetParticles - static_cast<int>(particles_.size());
+      const int refillCount = std::min(18, std::max(1, deficit));
+      for (int i = 0; i < refillCount; ++i) {
+        spawnParticle(count, targetParticles, true);
+      }
+    }
+
     if (static_cast<int>(particles_.size()) > targetParticles) {
       std::sort(particles_.begin(), particles_.end(), [](const EmberParticle &a, const EmberParticle &b) {
         return a.heat > b.heat;
@@ -102,15 +116,34 @@ class EmberEffect : public IEffect {
     }
 
     cohereParticles(speedScale, count, targetParticles);
+    refillLargestGap(speedScale, count, targetParticles);
 
     for (const auto &p : particles_) {
       addGlow(heatBuffer_, p, count);
     }
 
     const uint8_t globalBrightness = ctx.state.brightness;
+    const uint8_t keepPrev = static_cast<uint8_t>(constrain(static_cast<int>(200 - (speedScale * 28.0f)), 130, 210));
+    const int maxRise = std::max(6, static_cast<int>(roundf(8.0f + (18.0f * speedScale))));
+    const int maxFall = std::max(5, static_cast<int>(roundf(7.0f + (15.0f * speedScale))));
     for (uint16_t i = 0; i < count; ++i) {
-      heatBuffer_[i] = qadd8(heatBuffer_[i], settings_.bgEmber);
-      if (heatBuffer_[i] == 0) {
+      const uint8_t desired = qadd8(heatBuffer_[i], settings_.bgEmber);
+      const uint8_t prev = prevHeatBuffer_[i];
+
+      uint16_t blended = static_cast<uint16_t>((static_cast<uint16_t>(prev) * keepPrev) +
+                                               (static_cast<uint16_t>(desired) * (255 - keepPrev)));
+      uint8_t levelHeat = static_cast<uint8_t>(blended / 255);
+
+      if (levelHeat > prev) {
+        levelHeat = static_cast<uint8_t>(std::min<int>(levelHeat, static_cast<int>(prev) + maxRise));
+      } else if (levelHeat < prev) {
+        levelHeat = static_cast<uint8_t>(std::max<int>(levelHeat, static_cast<int>(prev) - maxFall));
+      }
+
+      heatBuffer_[i] = levelHeat;
+      prevHeatBuffer_[i] = levelHeat;
+
+      if (levelHeat == 0) {
         leds[i] = CRGB::Black;
         continue;
       }
@@ -120,7 +153,7 @@ class EmberEffect : public IEffect {
         flicker = random8(180, 255);
       }
 
-      uint8_t level = scale8(heatBuffer_[i], flicker);
+      uint8_t level = scale8(levelHeat, flicker);
       if (settings_.nightmode) {
         // Keep ember structure visible in dark rooms even when global brightness is very low.
         const uint16_t boosted = static_cast<uint16_t>(level) * 3U;
@@ -240,6 +273,7 @@ class EmberEffect : public IEffect {
   uint32_t frameCount_ = 0;
   std::vector<EmberParticle> particles_;
   std::vector<uint8_t> heatBuffer_;
+  std::vector<uint8_t> prevHeatBuffer_;
 
   float wrapCenter(float value, uint16_t count) const {
     if (count == 0) {
@@ -280,7 +314,37 @@ class EmberEffect : public IEffect {
     return std::max(1, radius);
   }
 
-  void spawnParticle(uint16_t count, int targetParticles) {
+  EmberParticle buildSpawnParticle(uint16_t count, int selected, bool emergencySpawn) const {
+    EmberParticle p;
+    const int minSize = std::max(1, static_cast<int>(settings_.min_size));
+    const int maxSize = std::max(minSize, static_cast<int>(settings_.max_size));
+
+    p.pos = selected;
+    p.anchorPos = static_cast<float>(selected);
+    p.centerPos = static_cast<float>(selected);
+    p.targetHeat = static_cast<uint8_t>(random(150, 256));
+    p.heat = static_cast<int16_t>(emergencySpawn ? random(25, 71) : random(8, 41));
+    p.peakSize = static_cast<float>(random(minSize, maxSize + 1));
+    p.startSize = std::max(0.25f, static_cast<float>(minSize) * (0.15f + (random(0, 201) / 1000.0f)));
+    p.size = p.startSize;
+    p.life = static_cast<int32_t>(random(80, 341)) * 4;
+    p.maxLife = p.life;
+    p.birthFrames = static_cast<int16_t>(emergencySpawn ? random(16, 41) : random(20, 91));
+    p.igniteRate = emergencySpawn ? (3.5f + (random(0, 401) / 100.0f)) : (2.0f + (random(0, 601) / 100.0f));
+    p.lifeDrift = 0.65f + (random(0, 801) / 1000.0f);
+    p.stallChance = 0.02f + (random(0, 101) / 1000.0f);
+    p.burstChance = 0.04f + (random(0, 141) / 1000.0f);
+    p.burstStrength = 1.0f + (random(0, 181) / 100.0f);
+    p.fadeAccel = 0.85f + (random(0, 701) / 1000.0f);
+    p.ripplePhase = random(0, 6284) / 1000.0f;
+    p.rippleRate = 0.035f + (random(0, 551) / 10000.0f);
+    p.rippleAmp = 0.6f + (random(0, 151) / 100.0f);
+    p.driftDir = random8(2) == 0 ? -1.0f : 1.0f;
+    p.driftSpan = 0.4f + (random(0, 181) / 100.0f);
+    return p;
+  }
+
+  void spawnParticle(uint16_t count, int targetParticles, bool emergencySpawn) {
     if (count == 0 || static_cast<int>(particles_.size()) >= targetParticles) {
       return;
     }
@@ -320,34 +384,60 @@ class EmberEffect : public IEffect {
       }
     }
 
-    EmberParticle p;
-    const int minSize = std::max(1, static_cast<int>(settings_.min_size));
-    const int maxSize = std::max(minSize, static_cast<int>(settings_.max_size));
+    particles_.push_back(buildSpawnParticle(count, selected, emergencySpawn));
+  }
 
-    p.pos = selected;
-    p.anchorPos = static_cast<float>(selected);
-    p.centerPos = static_cast<float>(selected);
-    p.targetHeat = static_cast<uint8_t>(random(150, 256));
-    p.heat = static_cast<int16_t>(random(8, 41));
-    p.peakSize = static_cast<float>(random(minSize, maxSize + 1));
-    p.startSize = std::max(0.25f, static_cast<float>(minSize) * (0.15f + (random(0, 201) / 1000.0f)));
-    p.size = p.startSize;
-    p.life = static_cast<int32_t>(random(80, 341)) * 4;
-    p.maxLife = p.life;
-    p.birthFrames = static_cast<int16_t>(random(20, 91));
-    p.igniteRate = 2.0f + (random(0, 601) / 100.0f);
-    p.lifeDrift = 0.65f + (random(0, 801) / 1000.0f);
-    p.stallChance = 0.02f + (random(0, 101) / 1000.0f);
-    p.burstChance = 0.04f + (random(0, 141) / 1000.0f);
-    p.burstStrength = 1.0f + (random(0, 181) / 100.0f);
-    p.fadeAccel = 0.85f + (random(0, 701) / 1000.0f);
-    p.ripplePhase = random(0, 6284) / 1000.0f;
-    p.rippleRate = 0.035f + (random(0, 551) / 10000.0f);
-    p.rippleAmp = 0.6f + (random(0, 151) / 100.0f);
-    p.driftDir = random8(2) == 0 ? -1.0f : 1.0f;
-    p.driftSpan = 0.4f + (random(0, 181) / 100.0f);
+  void refillLargestGap(float speedScale, uint16_t count, int targetParticles) {
+    if (count < 8 || targetParticles <= 1 || particles_.size() < 2) {
+      return;
+    }
 
-    particles_.push_back(p);
+    const int gapCheckEvery = std::max(1, static_cast<int>(roundf(8.0f / std::max(0.35f, speedScale))));
+    if ((frameCount_ % static_cast<uint32_t>(gapCheckEvery)) != 0) {
+      return;
+    }
+
+    float largestGap = 0.0f;
+    float gapMidpoint = 0.0f;
+    for (size_t i = 0; i < particles_.size(); ++i) {
+      const EmberParticle &a = particles_[i];
+      const EmberParticle &b = particles_[(i + 1) % particles_.size()];
+      const float forward = wrapCenter(b.anchorPos - a.anchorPos, count);
+      if (forward > largestGap) {
+        largestGap = forward;
+        gapMidpoint = wrapCenter(a.anchorPos + (forward * 0.5f), count);
+      }
+    }
+
+    const float expectedSpacing = static_cast<float>(count) / static_cast<float>(std::max(1, targetParticles));
+    const float voidThreshold = expectedSpacing * 2.6f;
+    if (largestGap < voidThreshold) {
+      return;
+    }
+
+    const int spawnPos = static_cast<int>(roundf(gapMidpoint)) % std::max<uint16_t>(1, count);
+    EmberParticle newcomer = buildSpawnParticle(count, spawnPos, true);
+
+    if (static_cast<int>(particles_.size()) >= targetParticles) {
+      auto weakest = std::min_element(
+          particles_.begin(), particles_.end(),
+          [](const EmberParticle &lhs, const EmberParticle &rhs) { return lhs.heat < rhs.heat; });
+      if (weakest != particles_.end()) {
+        // Rejuvenate a weak ember toward the gap instead of hard-replacing it.
+        const float pull = 0.45f;
+        weakest->anchorPos = wrapCenter(weakest->anchorPos + (signedRingDelta(weakest->anchorPos, newcomer.anchorPos, count) * pull), count);
+        weakest->centerPos = weakest->anchorPos;
+        weakest->pos = static_cast<int16_t>(roundf(weakest->centerPos)) % std::max<uint16_t>(1, count);
+        weakest->life = std::max<int32_t>(weakest->life, newcomer.life / 2);
+        weakest->maxLife = std::max<int32_t>(weakest->maxLife, newcomer.maxLife / 2);
+        weakest->heat = std::max<int16_t>(weakest->heat, newcomer.heat);
+        weakest->targetHeat = std::max<uint8_t>(weakest->targetHeat, newcomer.targetHeat);
+        weakest->birthFrames = std::max<int16_t>(weakest->birthFrames, newcomer.birthFrames / 2);
+      }
+      return;
+    }
+
+    particles_.push_back(newcomer);
   }
 
   bool updateParticle(EmberParticle &p, float speedScale, uint16_t count) {
@@ -360,15 +450,16 @@ class EmberEffect : public IEffect {
       --p.mergeBoostCooldown;
     }
 
-    int lifeDecay = std::max(1, static_cast<int>(roundf(0.55f * speedScale * p.lifeDrift)));
+    const float speedDecayFactor = 0.18f + (1.05f * speedScale);
+    int lifeDecay = std::max(1, static_cast<int>(roundf(speedDecayFactor * p.lifeDrift)));
     if ((random(0, 10000) / 10000.0f) < p.stallChance) {
       lifeDecay = std::max(0, lifeDecay - 1);
     }
     if ((random(0, 10000) / 10000.0f) < p.burstChance) {
-      lifeDecay += static_cast<int>(roundf(p.burstStrength));
+      lifeDecay += static_cast<int>(roundf(p.burstStrength * 0.5f));
     }
 
-    p.life = std::max(0, p.life - lifeDecay - (random8(100) < 20 ? 1 : 0));
+    p.life = std::max(0, p.life - lifeDecay - (random8(100) < 8 ? 1 : 0));
 
     const float lifeRatio = static_cast<float>(p.life) / std::max(1.0f, static_cast<float>(p.maxLife));
     const float birthRatio = std::min(1.0f, static_cast<float>(p.age) / std::max(1.0f, static_cast<float>(p.birthFrames)));
@@ -384,13 +475,14 @@ class EmberEffect : public IEffect {
     p.size = std::max(1.0f, p.startSize + ((p.peakSize - p.startSize) * growth));
 
     const float progress = 1.0f - lifeRatio;
-    const float phase = (frameCount_ * p.rippleRate) + p.ripplePhase;
+    const float motionSpeed = 0.55f + (0.65f * speedScale);
+    const float phase = (frameCount_ * p.rippleRate * motionSpeed) + p.ripplePhase;
     const float peakForMotion = std::max(1.0f, p.peakSize);
     const float sizeRatio = std::max(0.0f, std::min(1.0f, p.size / peakForMotion));
     const float motionScale = 0.12f + ((sizeRatio * sizeRatio) * 0.88f);
 
     const float ripple = sinf(phase) * p.rippleAmp * motionScale;
-    const float drift = p.driftDir * p.driftSpan * (progress * progress) * motionScale;
+    const float drift = p.driftDir * p.driftSpan * (progress * progress) * motionScale * motionSpeed;
     p.centerPos = p.anchorPos + ripple + drift;
     p.centerPos = wrapCenter(p.centerPos, count);
     p.pos = static_cast<int16_t>(roundf(p.centerPos)) % std::max<uint16_t>(1, count);
@@ -403,12 +495,12 @@ class EmberEffect : public IEffect {
 
     int heatDrop = std::max(
         1,
-        static_cast<int>(roundf((1.2f - lifeRatio) * speedScale * p.fadeAccel)));
+      static_cast<int>(roundf((0.45f + (0.85f * speedScale) - (lifeRatio * 0.30f)) * p.fadeAccel)));
     if ((random(0, 10000) / 10000.0f) < (p.stallChance * 0.5f)) {
       heatDrop = std::max(1, heatDrop - 1);
     }
 
-    p.heat = std::max<int16_t>(0, p.heat - heatDrop - (random8(100) < 12 ? 1 : 0));
+    p.heat = std::max<int16_t>(0, p.heat - heatDrop - (random8(100) < 5 ? 1 : 0));
 
     return p.life > 0 && p.heat > 0 && p.size >= 1.0f;
   }
@@ -472,7 +564,7 @@ class EmberEffect : public IEffect {
 
           weaker->heat = std::max<int16_t>(0, weaker->heat - siphon);
           dominant->heat = std::min<int16_t>(255, dominant->heat + static_cast<int>(siphon * 0.4f));
-          weaker->life = std::max<int32_t>(0, weaker->life - std::max(1, static_cast<int>(speedScale * (0.35f + (0.45f * closeness)))));
+          weaker->life = std::max<int32_t>(0, weaker->life - std::max(1, static_cast<int>(speedScale * (0.12f + (0.22f * closeness)))));
 
           if (dominant->mergeBoostCooldown <= 0) {
             const float lifeFactor = 2.0f + (random(0, 501) / 100.0f);
