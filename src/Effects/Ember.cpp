@@ -22,6 +22,7 @@ struct Settings {
   uint8_t red = 255;
   uint8_t green = 77;
   uint8_t blue = 0;
+  bool nightmode = false;
 };
 
 struct EmberParticle {
@@ -120,7 +121,17 @@ class EmberEffect : public IEffect {
       }
 
       uint8_t level = scale8(heatBuffer_[i], flicker);
-      level = scale8(level, globalBrightness);
+      if (settings_.nightmode) {
+        // Keep ember structure visible in dark rooms even when global brightness is very low.
+        const uint16_t boosted = static_cast<uint16_t>(level) * 3U;
+        uint8_t perceived = static_cast<uint8_t>(std::min<uint16_t>(255, boosted));
+        if (perceived > 0) {
+          perceived = std::max<uint8_t>(perceived, 16);
+        }
+        level = perceived;
+      } else {
+        level = scale8(level, globalBrightness);
+      }
 
       int16_t red = settings_.red;
       int16_t green = settings_.green;
@@ -135,6 +146,13 @@ class EmberEffect : public IEffect {
       red = (red * level) / 255;
       green = (green * level) / 255;
       blue = (blue * level) / 255;
+
+      if (settings_.nightmode) {
+        const uint8_t nightCap = static_cast<uint8_t>(constrain(static_cast<int>(globalBrightness) + 20, 20, 60));
+        red = scale8(static_cast<uint8_t>(constrain(red, 0, 255)), nightCap);
+        green = scale8(static_cast<uint8_t>(constrain(green, 0, 255)), nightCap);
+        blue = scale8(static_cast<uint8_t>(constrain(blue, 0, 255)), nightCap);
+      }
 
       leds[i] = CRGB(
           static_cast<uint8_t>(constrain(red, 0, 255)),
@@ -153,6 +171,7 @@ class EmberEffect : public IEffect {
            "{\"key\":\"flicker\",\"label\":\"Flicker\",\"type\":\"slider\",\"min\":0,\"max\":100,\"step\":1},"
            "{\"key\":\"whitehot\",\"label\":\"White Hot %\",\"type\":\"slider\",\"min\":0,\"max\":100,\"step\":1},"
            "{\"key\":\"bgEmber\",\"label\":\"BG Ember\",\"type\":\"slider\",\"min\":0,\"max\":100,\"step\":1},"
+           "{\"key\":\"nightmode\",\"label\":\"Night Mode\",\"type\":\"toggle\"},"
            "{\"key\":\"speed\",\"label\":\"Speed\",\"type\":\"slider\",\"min\":1,\"max\":200,\"step\":1},"
            "{\"key\":\"delay\",\"label\":\"Delay\",\"type\":\"slider\",\"min\":0,\"max\":120,\"step\":1},"
            "{\"key\":\"glow\",\"label\":\"Glow\",\"type\":\"slider\",\"min\":10,\"max\":100,\"step\":1},"
@@ -171,6 +190,7 @@ class EmberEffect : public IEffect {
     out += ",\"flicker\":" + String(settings_.flicker);
     out += ",\"whitehot\":" + String(settings_.whitehot);
     out += ",\"bgEmber\":" + String(settings_.bgEmber);
+    out += ",\"nightmode\":" + String(settings_.nightmode ? "true" : "false");
     out += ",\"speed\":" + String(settings_.speed);
     out += ",\"delay\":" + String(settings_.delay);
     out += ",\"glow\":" + String(settings_.glow);
@@ -191,6 +211,7 @@ class EmberEffect : public IEffect {
     else if (key == "flicker") settings_.flicker = static_cast<uint8_t>(constrain(intVal, 0, 100));
     else if (key == "whitehot") settings_.whitehot = static_cast<uint8_t>(constrain(intVal, 0, 100));
     else if (key == "bgEmber") settings_.bgEmber = static_cast<uint8_t>(constrain(intVal, 0, 100));
+    else if (key == "nightmode") settings_.nightmode = (value == "1" || value == "true" || value == "on");
     else if (key == "speed") settings_.speed = static_cast<uint8_t>(constrain(intVal, 1, 200));
     else if (key == "delay") settings_.delay = static_cast<uint8_t>(constrain(intVal, 0, 120));
     else if (key == "glow") settings_.glow = static_cast<uint8_t>(constrain(intVal, 10, 100));
