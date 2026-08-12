@@ -70,7 +70,7 @@ class LightningEffect : public IEffect {
       }
     }
 
-    std::vector<float> target(count, 0.020f + (activity * 0.030f));
+    std::vector<float> target(count, 0.0f);
     std::vector<Pulse> updated;
     updated.reserve(pulses_.size());
 
@@ -117,9 +117,9 @@ class LightningEffect : public IEffect {
       energy_[i] = clampf(e, 0.0f, 1.0f);
 
       const float power = powf(energy_[i], 1.10f) * brightness;
-      const uint8_t red = static_cast<uint8_t>(std::min(255.0f, 2.0f + (170.0f * power)));
-      const uint8_t green = static_cast<uint8_t>(std::min(255.0f, 4.0f + (205.0f * power)));
-      const uint8_t blue = static_cast<uint8_t>(std::min(255.0f, 10.0f + (255.0f * power)));
+      const uint8_t red = static_cast<uint8_t>(std::min(255.0f, 170.0f * power));
+      const uint8_t green = static_cast<uint8_t>(std::min(255.0f, 205.0f * power));
+      const uint8_t blue = static_cast<uint8_t>(std::min(255.0f, 255.0f * power));
       leds[i] = CRGB(red, green, blue);
     }
   }
