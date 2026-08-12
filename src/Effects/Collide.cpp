@@ -25,6 +25,10 @@ class CollideEffect : public IEffect {
     cooldownMs_ = 0;
     explosionAgeMs_ = 0;
     explosionCenter_ = 0.0f;
+    hueA_ = random8();
+    hueB_ = random8();
+    hueBoom_ = random8();
+    huePhase_ = 0;
     energy_.assign(count, 0.0f);
   }
 
@@ -40,13 +44,17 @@ class CollideEffect : public IEffect {
       cooldownMs_ = 0;
       explosionAgeMs_ = 0;
       explosionCenter_ = 0.0f;
+      huePhase_ = 0;
     }
 
     const float speedScale = clampf(static_cast<float>(ctx.state.speed) / 128.0f, 0.20f, 3.00f);
     const int32_t dtMs = std::max<int32_t>(1, ctx.deltaMs > 0 ? static_cast<int32_t>(ctx.deltaMs) : 33);
     const float dtSec = (static_cast<float>(dtMs) / 1000.0f) * speedScale;
+    huePhase_ = static_cast<uint16_t>(huePhase_ + static_cast<uint16_t>(std::max(1.0f, static_cast<float>(dtMs) * 0.2f * speedScale)));
 
     std::vector<float> target(count, 0.0f);
+    float boomRadius = 1.0f;
+    float boomT = 1.0f;
 
     if (!active_ && !exploding_) {
       cooldownMs_ -= static_cast<int32_t>(std::max(1.0f, static_cast<float>(dtMs) * speedScale));
@@ -69,6 +77,7 @@ class CollideEffect : public IEffect {
         explosionAgeMs_ = 0;
         const float toward = signedRingDelta(posA_, posB_, count) * 0.5f;
         explosionCenter_ = wrapPos(posA_ + toward, count);
+        hueBoom_ = static_cast<uint8_t>(((static_cast<uint16_t>(hueA_) + static_cast<uint16_t>(hueB_)) / 2U) + random8());
       }
     }
 
@@ -77,6 +86,8 @@ class CollideEffect : public IEffect {
       const float t = clampf(static_cast<float>(explosionAgeMs_) / static_cast<float>(settings_.impactDurationMs), 0.0f, 1.0f);
       const float envelope = powf(std::max(0.0f, 1.0f - t), 1.2f);
       const float radius = std::max(2.0f, static_cast<float>(settings_.impactRadius) * (0.30f + (0.70f * t)));
+      boomRadius = radius;
+      boomT = t;
 
       for (uint16_t i = 0; i < count; ++i) {
         const float d = ringDistance(static_cast<float>(i), explosionCenter_, count);
@@ -99,8 +110,27 @@ class CollideEffect : public IEffect {
       }
       energy_[i] = clampf(e, 0.0f, 1.0f);
 
-      const uint8_t white = static_cast<uint8_t>(std::min(255.0f, 255.0f * powf(energy_[i], 0.78f)));
-      leds[i] = CRGB(white, white, white);
+      const float dA = ringDistance(static_cast<float>(i), posA_, count);
+      const float dB = ringDistance(static_cast<float>(i), posB_, count);
+      const float dBoom = ringDistance(static_cast<float>(i), explosionCenter_, count);
+
+      float wA = active_ ? gaussianGlow(dA, 1.0f) : 0.0f;
+      float wB = active_ ? gaussianGlow(dB, 1.0f) : 0.0f;
+      float wBoom = exploding_ ? gaussianGlow(dBoom, boomRadius) * (0.75f + (0.25f * (1.0f - boomT))) : 0.0f;
+      const float total = wA + wB + wBoom;
+
+      const uint8_t value = static_cast<uint8_t>(std::min(255.0f, 255.0f * powf(energy_[i], 0.78f)));
+      if (value == 0 || total <= 0.0001f) {
+        leds[i] = CRGB::Black;
+        continue;
+      }
+
+      const float hueBoomShifted = static_cast<float>(static_cast<uint8_t>(hueBoom_ + ((i * 5U) & 0xFFU) + static_cast<uint8_t>(huePhase_ >> 3)));
+      const float hue = ((wA * static_cast<float>(hueA_)) +
+                         (wB * static_cast<float>(hueB_)) +
+                         (wBoom * hueBoomShifted)) /
+                        total;
+      leds[i] = CHSV(static_cast<uint8_t>(static_cast<int>(hue) & 0xFF), 245, value);
     }
   }
 
@@ -182,6 +212,10 @@ class CollideEffect : public IEffect {
   float explosionCenter_ = 0.0f;
   int32_t cooldownMs_ = 0;
   int32_t explosionAgeMs_ = 0;
+  uint8_t hueA_ = 0;
+  uint8_t hueB_ = 0;
+  uint8_t hueBoom_ = 0;
+  uint16_t huePhase_ = 0;
   std::vector<float> energy_;
 
   static float clampf(float value, float low, float high) {
@@ -230,12 +264,16 @@ class CollideEffect : public IEffect {
     return minS + (maxS - minS) * (static_cast<float>(random(0, 10001)) / 10000.0f);
   }
 
+  static float gaussianGlow(float distance, float sigma) {
+    const float x = distance / std::max(0.3f, sigma);
+    return expf(-0.5f * x * x);
+  }
+
   void addSpark(std::vector<float> &target, float center, float strength, uint16_t count) {
     const float sigma = 0.9f;
     for (uint16_t i = 0; i < count; ++i) {
       const float d = ringDistance(static_cast<float>(i), center, count);
-      const float x = d / sigma;
-      const float glow = expf(-0.5f * x * x);
+      const float glow = gaussianGlow(d, sigma);
       target[i] = std::max(target[i], strength * glow);
     }
   }
@@ -260,6 +298,8 @@ class CollideEffect : public IEffect {
 
     velA_ = dirA * randomSpeedLedsPerSec();
     velB_ = dirB * randomSpeedLedsPerSec();
+    hueA_ = random8();
+    hueB_ = static_cast<uint8_t>(hueA_ + random(70, 191));
 
     active_ = true;
     exploding_ = false;
