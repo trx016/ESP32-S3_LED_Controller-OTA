@@ -21,6 +21,7 @@ uint16_t systemStateGetLedCount();
 uint16_t systemStateGetLedCountMax();
 void systemStateSetEffectsFps(uint16_t fps);
 uint16_t systemStateGetEffectsFps();
+void systemStateSetCenterColorBalance(uint8_t redCenterBoost, uint8_t greenCenterBoost, uint8_t blueCenterBoost);
 void systemStateSetDeviceName(const String &name);
 void systemStateSaveWifiCredentials(const String &ssid, const String &pass);
 void systemStateApplyWifiCredentials(const String &ssid, const String &pass, uint32_t apGraceMs = 30000);

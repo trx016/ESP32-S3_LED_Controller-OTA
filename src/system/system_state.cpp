@@ -43,6 +43,7 @@ bool autoOtaEnabled = false;
 bool internetEnabled = true;
 uint16_t ledCount = LED_STRIP_LENGTH;
 uint16_t effectsFps = 20;
+CenterColorBalanceConfig centerColorBalance = {0, 0, 0};
 
 uint32_t nextInternetProbeMs = 0;
 uint32_t wifiConnectedBreathUntilMs = 0;
@@ -191,6 +192,9 @@ void loadSettings() {
   ledCount = static_cast<uint16_t>(constrain(storedLedCount, 1U, static_cast<uint32_t>(MAX_LED_COUNT)));
   const uint32_t storedEffectsFps = preferences.getUInt("effects_fps", 20);
   effectsFps = static_cast<uint16_t>(constrain(storedEffectsFps, 15U, static_cast<uint32_t>(effectsEngineGetMaxFpsForLedCount(ledCount))));
+  centerColorBalance.redCenterBoost = static_cast<uint8_t>(constrain(preferences.getUInt("cb_red", 0), 0U, 100U));
+  centerColorBalance.greenCenterBoost = static_cast<uint8_t>(constrain(preferences.getUInt("cb_green", 0), 0U, 100U));
+  centerColorBalance.blueCenterBoost = static_cast<uint8_t>(constrain(preferences.getUInt("cb_blue", 0), 0U, 100U));
   preferences.end();
 }
 
@@ -319,6 +323,7 @@ void systemStateBegin() {
   lastLoggedInternetConnected = false;
   lastLoggedStaIp = "";
   lastLoggedApIp = "";
+  effectsEngineSetCenterColorBalance(centerColorBalance);
 }
 
 void systemStateStartAccessPoint(DNSServer &dnsServer) {
@@ -433,6 +438,9 @@ String systemStateStatusJson() {
   json += "\"led_count_max\":" + String(MAX_LED_COUNT) + ",";
   json += "\"effects_fps\":" + String(effectsFps) + ",";
   json += "\"effects_fps_max\":" + String(effectsEngineGetMaxFpsForLedCount(ledCount)) + ",";
+  json += "\"center_balance_red\":" + String(centerColorBalance.redCenterBoost) + ",";
+  json += "\"center_balance_green\":" + String(centerColorBalance.greenCenterBoost) + ",";
+  json += "\"center_balance_blue\":" + String(centerColorBalance.blueCenterBoost) + ",";
   json += "\"ota_busy\":" + String(otaUpdateIsBusy() ? "true" : "false") + ",";
   json += "\"ota_update_available\":" + String(otaUpdateIsUpdateAvailable() ? "true" : "false") + ",";
   json += "\"ota_current\":\"" + otaUpdateGetCurrentVersion() + "\",";
@@ -529,6 +537,33 @@ void systemStateSetEffectsFps(uint16_t fps) {
 
 uint16_t systemStateGetEffectsFps() {
   return effectsFps;
+}
+
+void systemStateSetCenterColorBalance(uint8_t redCenterBoost, uint8_t greenCenterBoost, uint8_t blueCenterBoost) {
+  const CenterColorBalanceConfig next = {
+      static_cast<uint8_t>(constrain(redCenterBoost, 0, 100)),
+      static_cast<uint8_t>(constrain(greenCenterBoost, 0, 100)),
+      static_cast<uint8_t>(constrain(blueCenterBoost, 0, 100)),
+  };
+
+  if (next.redCenterBoost == centerColorBalance.redCenterBoost &&
+      next.greenCenterBoost == centerColorBalance.greenCenterBoost &&
+      next.blueCenterBoost == centerColorBalance.blueCenterBoost) {
+    return;
+  }
+
+  preferences.begin("settings", false);
+  preferences.putUInt("cb_red", next.redCenterBoost);
+  preferences.putUInt("cb_green", next.greenCenterBoost);
+  preferences.putUInt("cb_blue", next.blueCenterBoost);
+  preferences.end();
+
+  centerColorBalance = next;
+  effectsEngineSetCenterColorBalance(centerColorBalance);
+}
+
+CenterColorBalanceConfig systemStateGetCenterColorBalance() {
+  return centerColorBalance;
 }
 
 void systemStateSaveWifiCredentials(const String &ssid, const String &pass) {

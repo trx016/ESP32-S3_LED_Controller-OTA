@@ -41,6 +41,16 @@ const uint8_t kDirectRgbPatternId = 0;
 const uint8_t kSolidPatternId = 1;
 const char *kDirectRgbPatternName = "Direct RGB";
 
+struct EffectGlobalPresetData {
+  uint8_t powerOn;
+  uint8_t brightness;
+  uint8_t speed;
+  uint8_t dither;
+  uint8_t red;
+  uint8_t green;
+  uint8_t blue;
+};
+
 CRGB g_leds[LED_STRIP_LENGTH];
 #if LED_TRANSPORT_USE_BITBANG
 using LedTransportMethod = NeoEsp32BitBangWs2812Method;
@@ -71,6 +81,7 @@ bool g_lastFrameWasOff = false;
 bool g_lastOutputWasBlack = false;
 uint8_t g_lastActivePattern = 0xFF;
 EffectDescriptor g_directRgbFallback = {kDirectRgbPatternId, kDirectRgbPatternName, nullptr, nullptr};
+CenterColorBalanceConfig g_centerColorBalance = {0, 0, 0};
 
 uint16_t effectiveLedCount(uint16_t requestedCount) {
   return requestedCount > kTransportLedCount ? kTransportLedCount : requestedCount;
@@ -101,12 +112,42 @@ bool isAllBlackAfterBrightness(uint16_t activeLedCount, uint8_t brightness) {
   return true;
 }
 
+float centerCompensationWeight(uint16_t index, uint16_t count) {
+  if (count < 3) {
+    return 0.0f;
+  }
+
+  const float center = static_cast<float>(count - 1) * 0.5f;
+  const float distance = fabsf(static_cast<float>(index) - center);
+  return std::max(0.0f, 1.0f - (distance / std::max(1.0f, center)));
+}
+
+uint8_t applyCenterBoost(uint8_t value, uint8_t boostPercent, float weight) {
+  if (value == 0 || boostPercent == 0 || weight <= 0.0f) {
+    return value;
+  }
+
+  const float boost = 1.0f + ((static_cast<float>(boostPercent) / 100.0f) * weight);
+  return static_cast<uint8_t>(std::min(255.0f, roundf(static_cast<float>(value) * boost)));
+}
+
+CRGB applyCenterColorBalance(const CRGB &pixel, uint16_t index, uint16_t count) {
+  const float weight = centerCompensationWeight(index, count);
+  if (weight <= 0.0f) {
+    return pixel;
+  }
+
+  return CRGB(applyCenterBoost(pixel.r, g_centerColorBalance.redCenterBoost, weight),
+              applyCenterBoost(pixel.g, g_centerColorBalance.greenCenterBoost, weight),
+              applyCenterBoost(pixel.b, g_centerColorBalance.blueCenterBoost, weight));
+}
+
 void flushStrip(uint16_t activeLedCount, uint8_t brightness) {
   const uint16_t clampedCount = effectiveLedCount(activeLedCount);
   const uint16_t transportCount = kTransportLedCount;
 
   for (uint16_t i = 0; i < clampedCount; ++i) {
-    const CRGB &pixel = g_leds[i];
+    const CRGB pixel = applyCenterColorBalance(g_leds[i], i, clampedCount);
     g_strip.SetPixelColor(i,
                           RgbColor(scaleChannel(pixel.r, brightness),
                                    scaleChannel(pixel.g, brightness),
@@ -406,7 +447,24 @@ bool effectsEngineSaveActivePreset(uint8_t slot) {
   if (active == nullptr || active->effect == nullptr) {
     return false;
   }
-  return active->effect->savePreset(slot);
+
+  if (!active->effect->savePreset(slot)) {
+    return false;
+  }
+
+  const EffectGlobalPresetData globalPreset = {
+      s.powerOn ? static_cast<uint8_t>(1) : static_cast<uint8_t>(0),
+      s.brightness,
+      s.speed,
+      s.dither ? static_cast<uint8_t>(1) : static_cast<uint8_t>(0),
+      s.red,
+      s.green,
+      s.blue,
+  };
+  return saveEffectPresetGlobalBytes(active->id,
+                                     slot,
+                                     reinterpret_cast<const uint8_t *>(&globalPreset),
+                                     sizeof(globalPreset));
 }
 
 bool effectsEngineLoadActivePreset(uint8_t slot) {
@@ -417,6 +475,21 @@ bool effectsEngineLoadActivePreset(uint8_t slot) {
   }
   const bool loaded = active->effect->loadPreset(slot);
   if (loaded) {
+    EffectGlobalPresetData globalPreset = {};
+    if (loadEffectPresetGlobalBytes(active->id,
+                                    slot,
+                                    reinterpret_cast<uint8_t *>(&globalPreset),
+                                    sizeof(globalPreset))) {
+      LedEffectState next = snapshotState();
+      next.powerOn = globalPreset.powerOn != 0;
+      next.brightness = globalPreset.brightness;
+      next.speed = globalPreset.speed == 0 ? 1 : globalPreset.speed;
+      next.dither = globalPreset.dither != 0;
+      next.red = globalPreset.red;
+      next.green = globalPreset.green;
+      next.blue = globalPreset.blue;
+      writeState(next);
+    }
     active->effect->onActivate(snapshotState());
   }
   return loaded;
@@ -457,6 +530,16 @@ bool effectsEngineSetActivePresetName(uint8_t slot, const String &name) {
     return false;
   }
   return saveEffectPresetName(active->id, slot, name);
+}
+
+void effectsEngineSetCenterColorBalance(const CenterColorBalanceConfig &config) {
+  g_centerColorBalance.redCenterBoost = config.redCenterBoost;
+  g_centerColorBalance.greenCenterBoost = config.greenCenterBoost;
+  g_centerColorBalance.blueCenterBoost = config.blueCenterBoost;
+}
+
+CenterColorBalanceConfig effectsEngineGetCenterColorBalance() {
+  return g_centerColorBalance;
 }
 
 String effectsEngineStateJson() {

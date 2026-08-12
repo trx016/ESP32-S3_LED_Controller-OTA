@@ -41,6 +41,42 @@ inline bool loadEffectPresetBytes(uint8_t effectId, uint8_t slot, uint8_t *data,
   return read == length;
 }
 
+inline bool saveEffectPresetGlobalBytes(uint8_t effectId, uint8_t slot, const uint8_t *data, size_t length) {
+  if (slot < 1 || slot > 5 || data == nullptr || length == 0) {
+    return false;
+  }
+
+  Preferences prefs;
+  if (!prefs.begin("fxpreset", false)) {
+    return false;
+  }
+
+  char key[16] = {0};
+  snprintf(key, sizeof(key), "g%us%u", effectId, slot);
+  const size_t written = prefs.putBytes(key, data, length);
+  prefs.end();
+
+  return written == length;
+}
+
+inline bool loadEffectPresetGlobalBytes(uint8_t effectId, uint8_t slot, uint8_t *data, size_t length) {
+  if (slot < 1 || slot > 5 || data == nullptr || length == 0) {
+    return false;
+  }
+
+  Preferences prefs;
+  if (!prefs.begin("fxpreset", true)) {
+    return false;
+  }
+
+  char key[16] = {0};
+  snprintf(key, sizeof(key), "g%us%u", effectId, slot);
+  const size_t read = prefs.getBytes(key, data, length);
+  prefs.end();
+
+  return read == length;
+}
+
 inline bool saveEffectPresetName(uint8_t effectId, uint8_t slot, const String &name) {
   if (slot < 1 || slot > 5) {
     return false;

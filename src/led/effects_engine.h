@@ -4,6 +4,12 @@
 
 #include "../Effects/EffectTypes.h"
 
+struct CenterColorBalanceConfig {
+	uint8_t redCenterBoost;
+	uint8_t greenCenterBoost;
+	uint8_t blueCenterBoost;
+};
+
 void effectsEngineBegin();
 void effectsEngineTick();
 
@@ -28,6 +34,8 @@ bool effectsEngineSaveActivePreset(uint8_t slot);
 bool effectsEngineLoadActivePreset(uint8_t slot);
 String effectsEngineActivePresetNamesJson();
 bool effectsEngineSetActivePresetName(uint8_t slot, const String &name);
+void effectsEngineSetCenterColorBalance(const CenterColorBalanceConfig &config);
+CenterColorBalanceConfig effectsEngineGetCenterColorBalance();
 
 String effectsEngineStateJson();
 String effectsEngineCatalogJson();

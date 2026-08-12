@@ -167,6 +167,15 @@ void handleEffectsFpsSave() {
   g_server->send(200, "text/plain", "Global effects FPS updated.");
 }
 
+void handleColorBalanceSave() {
+  const uint8_t red = static_cast<uint8_t>(constrain(g_server->hasArg("red") ? g_server->arg("red").toInt() : 0, 0, 100));
+  const uint8_t green = static_cast<uint8_t>(constrain(g_server->hasArg("green") ? g_server->arg("green").toInt() : 0, 0, 100));
+  const uint8_t blue = static_cast<uint8_t>(constrain(g_server->hasArg("blue") ? g_server->arg("blue").toInt() : 0, 0, 100));
+
+  systemStateSetCenterColorBalance(red, green, blue);
+  g_server->send(200, "text/plain", "Center color balance updated.");
+}
+
 void handleOtaCheckNow() {
 #if defined(DEBUG_DISABLE_OTA_RUNTIME) && (DEBUG_DISABLE_OTA_RUNTIME == 1)
   g_server->send(503, "text/plain", "OTA runtime temporarily disabled for crash isolation.");
@@ -388,6 +397,7 @@ void setupWebRoutes(WebServer &server) {
   server.on("/api/settings/internet", HTTP_POST, handleInternetSettingSave);
   server.on("/api/settings/leds", HTTP_POST, handleLedCountSave);
   server.on("/api/settings/effects-fps", HTTP_POST, handleEffectsFpsSave);
+  server.on("/api/settings/color-balance", HTTP_POST, handleColorBalanceSave);
   server.on("/api/ota/check", HTTP_POST, handleOtaCheckNow);
   server.on("/api/ota/install", HTTP_POST, handleOtaInstallNow);
   server.on("/api/effects/state", HTTP_GET, handleEffectsState);

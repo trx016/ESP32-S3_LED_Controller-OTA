@@ -147,6 +147,12 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
       font: inherit;
       font-weight: 700;
     }
+    .triple {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
     .meta {
       margin-top: 12px;
       display: grid;
@@ -202,6 +208,18 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
           <div class="hint">Shared frame-rate cap applied to all effects.</div>
         </div>
         <input class="numberInput" id="effectsFps" type="number" min="15" step="1" />
+      </div>
+
+      <div class="switchRow">
+        <div>
+          <div class="switchLabel">Center Color Balance Boost</div>
+          <div class="hint">Boost red, green, and blue toward the strip center to offset voltage-drop discoloration between power injection points.</div>
+        </div>
+        <div class="triple">
+          <input class="numberInput" id="centerBalanceRed" type="number" min="0" max="100" step="1" placeholder="Red %" />
+          <input class="numberInput" id="centerBalanceGreen" type="number" min="0" max="100" step="1" placeholder="Green %" />
+          <input class="numberInput" id="centerBalanceBlue" type="number" min="0" max="100" step="1" placeholder="Blue %" />
+        </div>
       </div>
 
       <div class="meta">
@@ -285,11 +303,17 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
         const internetEl = document.getElementById('internetEnabled');
         const ledCountEl = document.getElementById('ledCount');
         const effectsFpsEl = document.getElementById('effectsFps');
+        const centerBalanceRedEl = document.getElementById('centerBalanceRed');
+        const centerBalanceGreenEl = document.getElementById('centerBalanceGreen');
+        const centerBalanceBlueEl = document.getElementById('centerBalanceBlue');
         const editingControls =
           document.activeElement === autoOtaEl ||
           document.activeElement === internetEl ||
           document.activeElement === ledCountEl ||
-          document.activeElement === effectsFpsEl;
+          document.activeElement === effectsFpsEl ||
+          document.activeElement === centerBalanceRedEl ||
+          document.activeElement === centerBalanceGreenEl ||
+          document.activeElement === centerBalanceBlueEl;
 
       latestConnected = !!s.connected;
       setWifiPill(latestConnected);
@@ -299,6 +323,9 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
           setCheckedIfChanged('internetEnabled', (s.internet_enabled !== false));
           setValueIfChanged('ledCount', String(s.led_count || 1));
           setValueIfChanged('effectsFps', String(s.effects_fps || 15));
+          setValueIfChanged('centerBalanceRed', String(s.center_balance_red || 0));
+          setValueIfChanged('centerBalanceGreen', String(s.center_balance_green || 0));
+          setValueIfChanged('centerBalanceBlue', String(s.center_balance_blue || 0));
         }
 
         const ledCountMax = String(s.led_count_max || 1);
@@ -333,6 +360,9 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
       const internetEnabled = document.getElementById('internetEnabled').checked ? '1' : '0';
       const ledCount = document.getElementById('ledCount').value || '1';
       const effectsFps = document.getElementById('effectsFps').value || '15';
+      const centerBalanceRed = document.getElementById('centerBalanceRed').value || '0';
+      const centerBalanceGreen = document.getElementById('centerBalanceGreen').value || '0';
+      const centerBalanceBlue = document.getElementById('centerBalanceBlue').value || '0';
 
       const otaRes = await fetch('/api/settings/ota', {
         method: 'POST',
@@ -358,14 +388,21 @@ const char SETTINGS_PAGE_HTML[] PROGMEM = R"HTML(
         body: new URLSearchParams({ fps: effectsFps })
       });
 
+      const colorBalanceRes = await fetch('/api/settings/color-balance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ red: centerBalanceRed, green: centerBalanceGreen, blue: centerBalanceBlue })
+      });
+
       const otaText = await otaRes.text();
       const internetText = await internetRes.text();
       const ledText = await ledRes.text();
       const fpsText = await fpsRes.text();
+      const colorBalanceText = await colorBalanceRes.text();
       const msg = document.getElementById('msg');
-      msg.textContent = `${otaText} ${internetText} ${ledText} ${fpsText}`;
+      msg.textContent = `${otaText} ${internetText} ${ledText} ${fpsText} ${colorBalanceText}`;
 
-      if (otaRes.ok && internetRes.ok && ledRes.ok && fpsRes.ok) {
+      if (otaRes.ok && internetRes.ok && ledRes.ok && fpsRes.ok && colorBalanceRes.ok) {
         setWifiPill(latestConnected);
       }
 
