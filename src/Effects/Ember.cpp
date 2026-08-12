@@ -1,4 +1,5 @@
 #include "EffectRegistry.h"
+#include "EffectPresetStore.h"
 
 #include <FastLED.h>
 
@@ -15,7 +16,6 @@ struct Settings {
   uint8_t flicker = 50;
   uint8_t whitehot = 20;
   uint8_t bgEmber = 10;
-  uint8_t speed = 40;
   uint8_t delay = 14;
   uint8_t glow = 70;
   uint8_t density = 40;
@@ -72,9 +72,7 @@ class EmberEffect : public IEffect {
     }
     std::fill(heatBuffer_.begin(), heatBuffer_.end(), 0);
 
-    const float globalSpeed = std::max(0.25f, static_cast<float>(ctx.state.speed) / 100.0f);
-    const float effectSpeed = std::max(0.25f, std::min(3.0f, static_cast<float>(settings_.speed) / 40.0f));
-    const float speedScale = std::max(0.25f, std::min(3.0f, globalSpeed * effectSpeed));
+    const float speedScale = std::max(0.25f, std::min(3.0f, static_cast<float>(ctx.state.speed) / 100.0f));
 
     const int requestedParticles = static_cast<int>(settings_.seeds);
     const int largeStripCap = std::max(96, static_cast<int>(count) / 6);
@@ -205,7 +203,6 @@ class EmberEffect : public IEffect {
            "{\"key\":\"whitehot\",\"label\":\"White Hot %\",\"type\":\"slider\",\"min\":0,\"max\":100,\"step\":1},"
            "{\"key\":\"bgEmber\",\"label\":\"BG Ember\",\"type\":\"slider\",\"min\":0,\"max\":100,\"step\":1},"
            "{\"key\":\"nightmode\",\"label\":\"Night Mode\",\"type\":\"toggle\"},"
-           "{\"key\":\"speed\",\"label\":\"Speed\",\"type\":\"slider\",\"min\":1,\"max\":200,\"step\":1},"
            "{\"key\":\"delay\",\"label\":\"Delay\",\"type\":\"slider\",\"min\":0,\"max\":120,\"step\":1},"
            "{\"key\":\"glow\",\"label\":\"Glow\",\"type\":\"slider\",\"min\":10,\"max\":100,\"step\":1},"
            "{\"key\":\"density\",\"label\":\"Density\",\"type\":\"slider\",\"min\":5,\"max\":100,\"step\":1},"
@@ -224,7 +221,6 @@ class EmberEffect : public IEffect {
     out += ",\"whitehot\":" + String(settings_.whitehot);
     out += ",\"bgEmber\":" + String(settings_.bgEmber);
     out += ",\"nightmode\":" + String(settings_.nightmode ? "true" : "false");
-    out += ",\"speed\":" + String(settings_.speed);
     out += ",\"delay\":" + String(settings_.delay);
     out += ",\"glow\":" + String(settings_.glow);
     out += ",\"density\":" + String(settings_.density);
@@ -245,7 +241,6 @@ class EmberEffect : public IEffect {
     else if (key == "whitehot") settings_.whitehot = static_cast<uint8_t>(constrain(intVal, 0, 100));
     else if (key == "bgEmber") settings_.bgEmber = static_cast<uint8_t>(constrain(intVal, 0, 100));
     else if (key == "nightmode") settings_.nightmode = (value == "1" || value == "true" || value == "on");
-    else if (key == "speed") settings_.speed = static_cast<uint8_t>(constrain(intVal, 1, 200));
     else if (key == "delay") settings_.delay = static_cast<uint8_t>(constrain(intVal, 0, 120));
     else if (key == "glow") settings_.glow = static_cast<uint8_t>(constrain(intVal, 10, 100));
     else if (key == "density") settings_.density = static_cast<uint8_t>(constrain(intVal, 5, 100));
@@ -265,7 +260,64 @@ class EmberEffect : public IEffect {
     settings_ = Settings();
   }
 
+  bool savePreset(uint8_t slot) override {
+    const PresetData preset = {
+        settings_.seeds,
+        settings_.min_size,
+        settings_.max_size,
+        settings_.flicker,
+        settings_.whitehot,
+        settings_.bgEmber,
+        settings_.delay,
+        settings_.glow,
+        settings_.density,
+        settings_.red,
+        settings_.green,
+        settings_.blue,
+        settings_.nightmode ? static_cast<uint8_t>(1) : static_cast<uint8_t>(0),
+    };
+    return saveEffectPresetBytes(52, slot, reinterpret_cast<const uint8_t *>(&preset), sizeof(preset));
+  }
+
+  bool loadPreset(uint8_t slot) override {
+    PresetData preset = {};
+    if (!loadEffectPresetBytes(52, slot, reinterpret_cast<uint8_t *>(&preset), sizeof(preset))) {
+      return false;
+    }
+
+    settings_.seeds = preset.seeds;
+    settings_.min_size = preset.min_size;
+    settings_.max_size = std::max(preset.min_size, preset.max_size);
+    settings_.flicker = preset.flicker;
+    settings_.whitehot = preset.whitehot;
+    settings_.bgEmber = preset.bgEmber;
+    settings_.delay = preset.delay;
+    settings_.glow = preset.glow;
+    settings_.density = preset.density;
+    settings_.red = preset.red;
+    settings_.green = preset.green;
+    settings_.blue = preset.blue;
+    settings_.nightmode = preset.nightmode != 0;
+    return true;
+  }
+
  private:
+  struct PresetData {
+    uint8_t seeds;
+    uint8_t min_size;
+    uint8_t max_size;
+    uint8_t flicker;
+    uint8_t whitehot;
+    uint8_t bgEmber;
+    uint8_t delay;
+    uint8_t glow;
+    uint8_t density;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+    uint8_t nightmode;
+  };
+
   static constexpr float kPi = 3.14159265f;
   static constexpr float kTau = kPi * 2.0f;
 

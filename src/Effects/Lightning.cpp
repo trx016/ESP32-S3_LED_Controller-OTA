@@ -1,4 +1,5 @@
 #include "EffectRegistry.h"
+#include "EffectPresetStore.h"
 
 #include <FastLED.h>
 
@@ -157,7 +158,37 @@ class LightningEffect : public IEffect {
     settings_ = Settings();
   }
 
+  bool savePreset(uint8_t slot) override {
+    const PresetData preset = {
+        settings_.activity,
+        settings_.spread,
+        settings_.softness,
+        settings_.branching,
+    };
+    return saveEffectPresetBytes(53, slot, reinterpret_cast<const uint8_t *>(&preset), sizeof(preset));
+  }
+
+  bool loadPreset(uint8_t slot) override {
+    PresetData preset = {};
+    if (!loadEffectPresetBytes(53, slot, reinterpret_cast<uint8_t *>(&preset), sizeof(preset))) {
+      return false;
+    }
+
+    settings_.activity = preset.activity;
+    settings_.spread = preset.spread;
+    settings_.softness = preset.softness;
+    settings_.branching = preset.branching;
+    return true;
+  }
+
  private:
+  struct PresetData {
+    uint8_t activity;
+    uint8_t spread;
+    uint8_t softness;
+    uint8_t branching;
+  };
+
   static constexpr float kTau = 6.28318531f;
 
   Settings settings_;

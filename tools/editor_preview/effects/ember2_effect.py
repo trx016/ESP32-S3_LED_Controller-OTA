@@ -22,7 +22,6 @@ class Ember2Effect(EffectBase):
             {"key": "flicker", "label": "Flicker", "type": "slider", "min": 0, "max": 100, "step": 1, "default": 50},
             {"key": "whitehot", "label": "White Hot %", "type": "slider", "min": 0, "max": 100, "step": 1, "default": 20},
             {"key": "bg_ember", "label": "BG Ember", "type": "slider", "min": 0, "max": 100, "step": 1, "default": 10},
-            {"key": "speed", "label": "Speed", "type": "slider", "min": 1, "max": 200, "step": 1, "default": 40},
             {"key": "delay", "label": "Delay", "type": "slider", "min": 0, "max": 120, "step": 1, "default": 14},
             {"key": "glow", "label": "Glow", "type": "slider", "min": 10, "max": 100, "step": 1, "default": 70},
             {"key": "density", "label": "Density", "type": "slider", "min": 5, "max": 100, "step": 1, "default": 40},
@@ -284,9 +283,7 @@ class Ember2Effect(EffectBase):
         self.heat_buffer = [0] * led_count
         effect_state = ctx.effect_state
 
-        global_speed = max(0.25, float(ctx.global_state.get("speed", 1.0)))
-        effect_speed = max(0.25, min(3.0, float(effect_state.get("speed", 40)) / 40.0))
-        speed_scale = max(0.25, min(3.0, global_speed * effect_speed))
+        speed_scale = max(0.25, min(3.0, float(ctx.global_state.get("speed", 1.0))))
 
         seeds_cap = max(1, int(effect_state.get("seeds", 8)))
         large_strip_cap = max(96, led_count // 6)

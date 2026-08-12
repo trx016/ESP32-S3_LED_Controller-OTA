@@ -1,4 +1,5 @@
 #include "EffectRegistry.h"
+#include "EffectPresetStore.h"
 #include <vector>
 #include <algorithm>
 
@@ -170,9 +171,24 @@ class LivingEffect : public IEffect {
   }
 
   String settingsStateJson() const override {
-    char buffer[512];
+    char color[8];
+    snprintf(color, sizeof(color), "#%06lX", static_cast<unsigned long>(settings.color & 0xFFFFFFUL));
+
+    char buffer[256];
     snprintf(buffer, sizeof(buffer),
-      R"({"settings": {}})");
+      R"({"seeds":%u,"min_size":%u,"max_size":%u,"flicker":%u,"whitehot":%u,"bgEmber":%u,"brightness":%u,"speed":%u,"delay":%u,"glow":%u,"density":%u,"color":"%s"})",
+      settings.seeds,
+      settings.min_size,
+      settings.max_size,
+      settings.flicker,
+      settings.whitehot,
+      settings.bgEmber,
+      settings.brightness,
+      settings.speed,
+      settings.delay,
+      settings.glow,
+      settings.density,
+      color);
     return String(buffer);
   }
 
@@ -205,6 +221,61 @@ class LivingEffect : public IEffect {
   void resetSettings() override {
     settings = Settings();
   }
+
+  bool savePreset(uint8_t slot) override {
+    const PresetData preset = {
+      settings.speed,
+      settings.delay,
+      settings.glow,
+      settings.density,
+      settings.color,
+      settings.seeds,
+      settings.min_size,
+      settings.max_size,
+      settings.flicker,
+      settings.whitehot,
+      settings.bgEmber,
+      settings.brightness,
+    };
+    return saveEffectPresetBytes(51, slot, reinterpret_cast<const uint8_t *>(&preset), sizeof(preset));
+  }
+
+  bool loadPreset(uint8_t slot) override {
+    PresetData preset = {};
+    if (!loadEffectPresetBytes(51, slot, reinterpret_cast<uint8_t *>(&preset), sizeof(preset))) {
+      return false;
+    }
+
+    settings.speed = preset.speed;
+    settings.delay = preset.delay;
+    settings.glow = preset.glow;
+    settings.density = preset.density;
+    settings.color = preset.color;
+    settings.seeds = preset.seeds;
+    settings.min_size = preset.min_size;
+    settings.max_size = std::max(preset.min_size, preset.max_size);
+    settings.flicker = preset.flicker;
+    settings.whitehot = preset.whitehot;
+    settings.bgEmber = preset.bgEmber;
+    settings.brightness = preset.brightness;
+    return true;
+  }
+
+ private:
+  struct PresetData {
+    uint8_t speed;
+    uint8_t delay;
+    uint8_t glow;
+    uint8_t density;
+    uint32_t color;
+    uint8_t seeds;
+    uint8_t min_size;
+    uint8_t max_size;
+    uint8_t flicker;
+    uint8_t whitehot;
+    uint8_t bgEmber;
+    uint8_t brightness;
+  };
 };
 
 }  // namespace
