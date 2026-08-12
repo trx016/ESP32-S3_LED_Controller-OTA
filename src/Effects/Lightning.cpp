@@ -10,7 +10,8 @@
 namespace {
 
 struct Settings {
-  uint8_t activity = 24;
+  uint8_t activity = 12;
+  uint8_t variance = 35;
   uint8_t minSpread = 8;
   uint8_t maxSpread = 18;
   uint8_t softness = 82;
@@ -52,17 +53,19 @@ class LightningEffect : public IEffect {
     const int32_t dtMs = std::max<int32_t>(1, ctx.deltaMs > 0 ? static_cast<int32_t>(ctx.deltaMs) : 33);
     const float speed = clampf(static_cast<float>(ctx.state.speed) / 100.0f, 0.25f, 3.0f);
 
-    const float activity = clampf(static_cast<float>(settings_.activity) / 100.0f, 0.01f, 1.0f);
+    const float strikesPerMinute = clampf(static_cast<float>(settings_.activity), 1.0f, 180.0f);
+    const float variance = clampf(static_cast<float>(settings_.variance) / 100.0f, 0.0f, 1.0f);
     const float minSpread = clampf(static_cast<float>(settings_.minSpread), 2.0f, 60.0f);
     const float maxSpread = clampf(static_cast<float>(settings_.maxSpread), minSpread, 60.0f);
     const float softness = clampf(static_cast<float>(settings_.softness) / 100.0f, 0.1f, 1.0f);
     const float branching = clampf(static_cast<float>(settings_.branching) / 100.0f, 0.0f, 1.0f);
     const float timingScale = clampf(speed, 0.25f, 3.0f);
 
-    const float strikesPerSecond = (0.10f + (activity * 1.20f)) * (0.60f + (0.80f * speed));
+    const float rateJitter = 1.0f + randomFloat(-variance, variance);
+    const float strikesPerSecond = std::max(0.001f, (strikesPerMinute / 60.0f) * rateJitter) * timingScale;
     const float spawnChance = 1.0f - expf(-(strikesPerSecond * (static_cast<float>(dtMs) / 1000.0f)));
     if (randomUnit() < spawnChance) {
-      spawnCluster(count, minSpread, maxSpread, branching, activity, timingScale);
+      spawnCluster(count, minSpread, maxSpread, branching, strikesPerMinute, timingScale);
     }
 
     if (burstRemaining_ > 0) {
@@ -72,7 +75,7 @@ class LightningEffect : public IEffect {
                      std::max(2.0f, minSpread * 0.9f),
                      std::max(2.0f, maxSpread * 0.9f),
                      branching * 0.8f,
-                     activity * 0.8f,
+                     strikesPerMinute * 0.8f,
                      timingScale);
         --burstRemaining_;
         burstDelayMs_ = static_cast<int32_t>(randomFloat(40.0f, 110.0f) / timingScale);
@@ -135,7 +138,8 @@ class LightningEffect : public IEffect {
 
   String settingsSchemaJson() const override {
     return "["
-           "{\"key\":\"activity\",\"label\":\"Activity\",\"type\":\"slider\",\"min\":1,\"max\":100,\"step\":1},"
+           "{\"key\":\"activity\",\"label\":\"Strikes / Min\",\"type\":\"slider\",\"min\":1,\"max\":180,\"step\":1},"
+           "{\"key\":\"variance\",\"label\":\"Variance %\",\"type\":\"slider\",\"min\":0,\"max\":100,\"step\":1},"
            "{\"key\":\"minSpread\",\"label\":\"Arc Spread Min\",\"type\":\"slider\",\"min\":2,\"max\":60,\"step\":1},"
            "{\"key\":\"maxSpread\",\"label\":\"Arc Spread Max\",\"type\":\"slider\",\"min\":2,\"max\":60,\"step\":1},"
            "{\"key\":\"softness\",\"label\":\"Softness\",\"type\":\"slider\",\"min\":10,\"max\":100,\"step\":1},"
@@ -146,6 +150,7 @@ class LightningEffect : public IEffect {
   String settingsStateJson() const override {
     String out = "{";
     out += "\"activity\":" + String(settings_.activity);
+    out += ",\"variance\":" + String(settings_.variance);
     out += ",\"minSpread\":" + String(settings_.minSpread);
     out += ",\"maxSpread\":" + String(settings_.maxSpread);
     out += ",\"softness\":" + String(settings_.softness);
@@ -156,7 +161,8 @@ class LightningEffect : public IEffect {
 
   bool setSetting(const String &key, const String &value) override {
     const int intVal = value.toInt();
-    if (key == "activity") settings_.activity = static_cast<uint8_t>(constrain(intVal, 1, 100));
+    if (key == "activity") settings_.activity = static_cast<uint8_t>(constrain(intVal, 1, 180));
+    else if (key == "variance") settings_.variance = static_cast<uint8_t>(constrain(intVal, 0, 100));
     else if (key == "minSpread") settings_.minSpread = static_cast<uint8_t>(constrain(intVal, 2, 60));
     else if (key == "maxSpread") settings_.maxSpread = static_cast<uint8_t>(constrain(intVal, 2, 60));
     else if (key == "softness") settings_.softness = static_cast<uint8_t>(constrain(intVal, 10, 100));
@@ -176,6 +182,7 @@ class LightningEffect : public IEffect {
   bool savePreset(uint8_t slot) override {
     const PresetData preset = {
         settings_.activity,
+        settings_.variance,
         settings_.minSpread,
         settings_.maxSpread,
         settings_.softness,
@@ -191,6 +198,7 @@ class LightningEffect : public IEffect {
     }
 
     settings_.activity = preset.activity;
+  settings_.variance = preset.variance;
     settings_.minSpread = preset.minSpread;
     settings_.maxSpread = std::max(preset.minSpread, preset.maxSpread);
     settings_.softness = preset.softness;
@@ -201,6 +209,7 @@ class LightningEffect : public IEffect {
  private:
   struct PresetData {
     uint8_t activity;
+    uint8_t variance;
     uint8_t minSpread;
     uint8_t maxSpread;
     uint8_t softness;
@@ -249,7 +258,7 @@ class LightningEffect : public IEffect {
                     float minSpread,
                     float maxSpread,
                     float branching,
-                    float activity,
+                    float strikesPerMinute,
                     float timingScale) {
     if (count == 0) {
       return;
@@ -257,7 +266,8 @@ class LightningEffect : public IEffect {
 
     const int16_t center = static_cast<int16_t>(random(count));
     const float baseSpread = randomFloat(minSpread, maxSpread);
-    const float peak = 0.18f + (activity * 0.32f) + randomFloat(0.02f, 0.14f);
+    const float activityNorm = clampf(strikesPerMinute / 60.0f, 0.02f, 1.0f);
+    const float peak = 0.18f + (activityNorm * 0.32f) + randomFloat(0.02f, 0.14f);
     const float radius = std::max(2.0f, baseSpread * randomFloat(0.72f, 1.18f));
     const int32_t duration = static_cast<int32_t>(randomFloat(140.0f, 360.0f) / timingScale);
 
@@ -289,7 +299,7 @@ class LightningEffect : public IEffect {
       pulses_.push_back(branchPulse);
     }
 
-    if (randomUnit() < (0.18f + (activity * 0.45f))) {
+    if (randomUnit() < (0.10f + (activityNorm * 0.50f))) {
       burstRemaining_ = static_cast<int16_t>(random(1, 3));
       burstDelayMs_ = std::max<int32_t>(12, static_cast<int32_t>(randomFloat(30.0f, 90.0f) / timingScale));
     }

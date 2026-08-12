@@ -17,7 +17,8 @@ class LightningEffect(EffectBase):
 
     def editor_settings_schema(self):
         return [
-            {"key": "activity", "label": "Activity", "type": "slider", "min": 1, "max": 100, "step": 1, "default": 24},
+            {"key": "activity", "label": "Strikes / Min", "type": "slider", "min": 1, "max": 180, "step": 1, "default": 12},
+            {"key": "variance", "label": "Variance %", "type": "slider", "min": 0, "max": 100, "step": 1, "default": 35},
             {"key": "minSpread", "label": "Arc Spread Min", "type": "slider", "min": 2, "max": 60, "step": 1, "default": 8},
             {"key": "maxSpread", "label": "Arc Spread Max", "type": "slider", "min": 2, "max": 60, "step": 1, "default": 18},
             {"key": "softness", "label": "Softness", "type": "slider", "min": 10, "max": 100, "step": 1, "default": 82},
@@ -34,19 +35,20 @@ class LightningEffect(EffectBase):
         dt_ms = max(1, int(ctx.delta_ms) if ctx.delta_ms > 0 else 33)
         speed = max(0.25, min(3.0, float(ctx.speed_norm)))
 
-        activity = max(1.0, min(100.0, float(ctx.effect_state.get("activity", 16.0)))) / 100.0
+        strikes_per_minute = max(1.0, min(180.0, float(ctx.effect_state.get("activity", 12.0))))
+        variance = max(0.0, min(100.0, float(ctx.effect_state.get("variance", 35.0)))) / 100.0
         min_spread = max(2.0, min(60.0, float(ctx.effect_state.get("minSpread", 8.0))))
         max_spread = max(min_spread, min(60.0, float(ctx.effect_state.get("maxSpread", 18.0))))
         softness = max(10.0, min(100.0, float(ctx.effect_state.get("softness", 82.0)))) / 100.0
         branching = max(0.0, min(100.0, float(ctx.effect_state.get("branching", 28.0)))) / 100.0
         timing_scale = max(0.25, min(3.0, speed))
 
-        # Sleep-friendly, but visible in preview at default settings.
-        strikes_per_second = (0.10 + (activity * 1.20)) * (0.60 + (0.80 * speed))
+        rate_jitter = 1.0 + random.uniform(-variance, variance)
+        strikes_per_second = max(0.001, (strikes_per_minute / 60.0) * rate_jitter) * timing_scale
         spawn_chance = 1.0 - math.exp(-(strikes_per_second * (dt_ms / 1000.0)))
 
         if random.random() < spawn_chance:
-            self._spawn_cluster(ctx.led_count, min_spread, max_spread, branching, activity, timing_scale)
+            self._spawn_cluster(ctx.led_count, min_spread, max_spread, branching, strikes_per_minute, timing_scale)
 
         if self._burst_remaining > 0:
             self._burst_delay_ms -= max(1, int(dt_ms * timing_scale))
@@ -56,7 +58,7 @@ class LightningEffect(EffectBase):
                     max(2.0, min_spread * 0.9),
                     max(2.0, max_spread * 0.9),
                     branching * 0.8,
-                    activity * 0.8,
+                    strikes_per_minute * 0.8,
                     timing_scale,
                 )
                 self._burst_remaining -= 1
@@ -121,12 +123,13 @@ class LightningEffect(EffectBase):
         min_spread: float,
         max_spread: float,
         branching: float,
-        activity: float,
+        strikes_per_minute: float,
         timing_scale: float,
     ) -> None:
         center = random.randint(0, max(0, led_count - 1))
         base_spread = random.uniform(min_spread, max_spread)
-        peak = 0.18 + (activity * 0.32) + random.uniform(0.02, 0.14)
+        activity_norm = max(0.02, min(1.0, strikes_per_minute / 60.0))
+        peak = 0.18 + (activity_norm * 0.32) + random.uniform(0.02, 0.14)
         radius = max(2.0, base_spread * random.uniform(0.72, 1.18))
         duration = max(60, int(random.uniform(140.0, 360.0) / timing_scale))
         flicker_scale = max(0.75, min(1.5, 0.75 + (timing_scale * 0.25)))
@@ -160,7 +163,7 @@ class LightningEffect(EffectBase):
                 }
             )
 
-        if random.random() < (0.18 + (activity * 0.45)):
+        if random.random() < (0.10 + (activity_norm * 0.50)):
             self._burst_remaining = random.randint(1, 2)
             self._burst_delay_ms = max(12, int(random.uniform(30.0, 90.0) / timing_scale))
 
