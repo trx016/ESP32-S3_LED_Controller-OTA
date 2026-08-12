@@ -107,7 +107,7 @@ class CollideEffect(EffectBase):
                     hue_weight,
                     particle["pos"],
                     int(particle["hue"]) & 0xFF,
-                    envelope,
+                    envelope * float(particle.get("intensity", 1.0)),
                     sigma,
                     ctx.led_count,
                 )
@@ -201,6 +201,26 @@ class CollideEffect(EffectBase):
                     "life_ms": particle_life,
                     "hue": hue,
                     "size": random.uniform(0.65, 1.55),
+                    "intensity": 1.0,
+                }
+            )
+
+        spark_count = max(2, particle_count // 3)
+        for _ in range(spark_count):
+            direction = random.choice([-1.0, 1.0])
+            travel_goal = impact_radius * random.uniform(0.35, 1.10)
+            particle_life = life_ms * random.uniform(0.30, 0.72)
+            base_speed = travel_goal / max(0.04, particle_life / 1000.0)
+            speed = base_speed * random.uniform(0.95, 1.55 + (speed_spread * 0.25))
+            particles.append(
+                {
+                    "pos": center,
+                    "vel": direction * speed,
+                    "age_ms": 0.0,
+                    "life_ms": particle_life,
+                    "hue": random.randint(0, 255),
+                    "size": random.uniform(0.16, 0.34),
+                    "intensity": random.uniform(1.15, 1.55),
                 }
             )
 

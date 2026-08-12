@@ -30,6 +30,7 @@ struct BurstParticle {
   float lifeMs;
   uint8_t hue;
   float size;
+  float intensity;
 };
 
 class CollideEffect : public IEffect {
@@ -129,7 +130,7 @@ class CollideEffect : public IEffect {
                         hueWeight,
                         particle.pos,
                         particle.hue,
-                        envelope,
+                        envelope * particle.intensity,
                         sigma,
                         count);
         survivors.push_back(particle);
@@ -415,7 +416,26 @@ class CollideEffect : public IEffect {
                                  0.0f,
                                  particleLife,
                                  hue,
-                                 randomRange(0.65f, 1.55f)});
+                                 randomRange(0.65f, 1.55f),
+                                 1.0f});
+    }
+
+    const uint8_t sparkCount = std::max<uint8_t>(2, particleCount / 3);
+    for (uint8_t idx = 0; idx < sparkCount; ++idx) {
+      const float direction = randomUnit() < 0.5f ? -1.0f : 1.0f;
+      const float travelGoal = impactRadius * randomRange(0.35f, 1.10f);
+      const float particleLife = lifeMs * randomRange(0.30f, 0.72f);
+      const float baseSpeed = travelGoal / std::max(0.04f, particleLife / 1000.0f);
+      const float speed = baseSpeed * randomRange(0.95f, 1.55f + (speedSpread * 0.25f));
+      const uint8_t hue = random8();
+
+      burstParticles_.push_back({center,
+                                 direction * speed,
+                                 0.0f,
+                                 particleLife,
+                                 hue,
+                                 randomRange(0.16f, 0.34f),
+                                 randomRange(1.15f, 1.55f)});
     }
   }
 
