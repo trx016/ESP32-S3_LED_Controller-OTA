@@ -111,6 +111,7 @@ class LightningEffect : public IEffect {
     const float hold = clampf(0.92f - ((speed - 0.25f) * 0.14f) + ((softness - 0.5f) * 0.08f), 0.55f, 0.92f);
     const float riseStep = 0.020f + (0.070f * speed);
     const float fallStep = 0.015f + (0.050f * speed);
+    const float fadeFloor = 0.012f;
     for (uint16_t i = 0; i < count; ++i) {
       const float t = clampf(target[i], 0.0f, 1.0f);
       float e = (energy_[i] * hold) + (t * (1.0f - hold));
@@ -122,6 +123,9 @@ class LightningEffect : public IEffect {
       }
 
       energy_[i] = clampf(e, 0.0f, 1.0f);
+      if (t <= 0.0005f && energy_[i] < fadeFloor) {
+        energy_[i] = 0.0f;
+      }
 
       const float power = powf(energy_[i], 0.72f);
       const uint8_t white = static_cast<uint8_t>(std::min(255.0f, 255.0f * power));

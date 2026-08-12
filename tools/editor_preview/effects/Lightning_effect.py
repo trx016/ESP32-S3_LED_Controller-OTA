@@ -92,6 +92,7 @@ class LightningEffect(EffectBase):
         hold = max(0.55, min(0.92, 0.92 - ((speed - 0.25) * 0.14) + ((softness - 0.5) * 0.08)))
         rise_step = 0.020 + (0.070 * speed)
         fall_step = 0.015 + (0.050 * speed)
+        fade_floor = 0.012
 
         pixels: List[Tuple[int, int, int]] = []
         brightness = max(0.0, min(1.0, float(ctx.brightness_norm)))
@@ -105,6 +106,8 @@ class LightningEffect(EffectBase):
                 e = max(e, self._energy[i] - fall_step)
 
             self._energy[i] = max(0.0, min(1.0, e))
+            if t <= 0.0005 and self._energy[i] < fade_floor:
+                self._energy[i] = 0.0
 
             power = (self._energy[i] ** 0.72) * brightness
             white = int(255 * power)

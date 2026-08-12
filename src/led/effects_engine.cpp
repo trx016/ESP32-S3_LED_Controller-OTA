@@ -137,6 +137,14 @@ CRGB applyCenterColorBalance(const CRGB &pixel, uint16_t index, uint16_t count) 
     return pixel;
   }
 
+  if (pixel.r == pixel.g && pixel.g == pixel.b) {
+    const uint8_t neutralBoost = std::max(g_centerColorBalance.redCenterBoost,
+                                          std::max(g_centerColorBalance.greenCenterBoost,
+                                                   g_centerColorBalance.blueCenterBoost));
+    const uint8_t boosted = applyCenterBoost(pixel.r, neutralBoost, weight);
+    return CRGB(boosted, boosted, boosted);
+  }
+
   return CRGB(applyCenterBoost(pixel.r, g_centerColorBalance.redCenterBoost, weight),
               applyCenterBoost(pixel.g, g_centerColorBalance.greenCenterBoost, weight),
               applyCenterBoost(pixel.b, g_centerColorBalance.blueCenterBoost, weight));
