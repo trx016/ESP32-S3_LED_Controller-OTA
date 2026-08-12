@@ -19,10 +19,10 @@ class NeoPrismEffect : public IEffect {
   void begin(CRGB *leds, uint16_t count) override {
     (void)leds;
     (void)count;
-    activeHue_ = random8();
-    targetHue_ = random8();
-    while (targetHue_ == activeHue_) {
-      targetHue_ = random8();
+    activeBaseHue_ = random8();
+    targetBaseHue_ = random8();
+    while (targetBaseHue_ == activeBaseHue_) {
+      targetBaseHue_ = random8();
     }
     phaseMs_ = 0;
     transitioning_ = false;
@@ -43,21 +43,25 @@ class NeoPrismEffect : public IEffect {
     if (!transitioning_ && phaseMs_ >= holdMs) {
       transitioning_ = true;
       phaseMs_ = 0;
-      targetHue_ = random8();
-      while (targetHue_ == activeHue_) {
-        targetHue_ = random8();
+      targetBaseHue_ = random8();
+      while (targetBaseHue_ == activeBaseHue_) {
+        targetBaseHue_ = random8();
       }
     }
 
     if (transitioning_ && phaseMs_ >= blendMs) {
-      activeHue_ = targetHue_;
+      activeBaseHue_ = targetBaseHue_;
       transitioning_ = false;
       phaseMs_ = 0;
     }
 
-    const uint8_t hue = computeHue();
-    const CRGB color = CHSV(hue, settings_.saturation, settings_.value);
-    fill_solid(leds, count, color);
+    const uint8_t baseHue = computeBaseHue();
+    // Wide hue span keeps several colors visible simultaneously without positional motion.
+    const uint16_t span = 196;
+    for (uint16_t i = 0; i < count; ++i) {
+      const uint8_t posHue = static_cast<uint8_t>((baseHue + ((static_cast<uint32_t>(i) * span) / std::max<uint16_t>(1, count - 1))) & 0xFF);
+      leds[i] = CHSV(posHue, settings_.saturation, settings_.value);
+    }
   }
 
   String settingsSchemaJson() const override {
@@ -125,8 +129,8 @@ class NeoPrismEffect : public IEffect {
   };
 
   Settings settings_;
-  uint8_t activeHue_ = 0;
-  uint8_t targetHue_ = 0;
+  uint8_t activeBaseHue_ = 0;
+  uint8_t targetBaseHue_ = 0;
   int32_t phaseMs_ = 0;
   bool transitioning_ = false;
 
@@ -134,15 +138,15 @@ class NeoPrismEffect : public IEffect {
     return std::max(low, std::min(high, value));
   }
 
-  uint8_t computeHue() const {
+  uint8_t computeBaseHue() const {
     if (!transitioning_) {
-      return activeHue_;
+      return activeBaseHue_;
     }
 
     const float blendMs = static_cast<float>(std::max<int32_t>(120, settings_.transitionMs));
     const float t = clampf(static_cast<float>(phaseMs_) / blendMs, 0.0f, 1.0f);
-    const int16_t diff = static_cast<int16_t>(targetHue_) - static_cast<int16_t>(activeHue_);
-    const float hue = static_cast<float>(activeHue_) + (static_cast<float>(diff) * t);
+    const int16_t diff = static_cast<int16_t>(targetBaseHue_) - static_cast<int16_t>(activeBaseHue_);
+    const float hue = static_cast<float>(activeBaseHue_) + (static_cast<float>(diff) * t);
     return static_cast<uint8_t>(static_cast<int>(hue) & 0xFF);
   }
 };

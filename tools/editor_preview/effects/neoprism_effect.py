@@ -9,8 +9,8 @@ from effect_runtime import EffectBase, EffectContext
 class NeoPrismEffect(EffectBase):
     def __init__(self) -> None:
         self.led_count = 120
-        self._active_hue = random.randint(0, 255)
-        self._target_hue = random.randint(0, 255)
+        self._active_base_hue = random.randint(0, 255)
+        self._target_base_hue = random.randint(0, 255)
         self._phase_ms = 0
         self._transitioning = False
 
@@ -36,34 +36,41 @@ class NeoPrismEffect(EffectBase):
         if not self._transitioning and self._phase_ms >= hold_ms:
             self._transitioning = True
             self._phase_ms = 0
-            self._target_hue = random.randint(0, 255)
-            while self._target_hue == self._active_hue:
-                self._target_hue = random.randint(0, 255)
+            self._target_base_hue = random.randint(0, 255)
+            while self._target_base_hue == self._active_base_hue:
+                self._target_base_hue = random.randint(0, 255)
 
         if self._transitioning and self._phase_ms >= blend_ms:
-            self._active_hue = self._target_hue
+            self._active_base_hue = self._target_base_hue
             self._transitioning = False
             self._phase_ms = 0
 
-        hue = self._compute_hue(blend_ms)
+        base_hue = self._compute_base_hue(blend_ms)
         sat = max(0, min(255, int(ctx.effect_state.get("saturation", 230))))
         val = max(1, min(255, int(ctx.effect_state.get("value", 255))))
-
-        r, g, b = self._hsv_to_rgb(hue, sat, val)
         brightness = max(0.0, min(1.0, float(ctx.brightness_norm)))
-        color = (
-            max(0, min(255, int(r * brightness))),
-            max(0, min(255, int(g * brightness))),
-            max(0, min(255, int(b * brightness))),
-        )
-        return [color] * ctx.led_count
 
-    def _compute_hue(self, blend_ms: int) -> int:
+        span = 196
+        pixels: List[Tuple[int, int, int]] = []
+        denom = max(1, ctx.led_count - 1)
+        for i in range(ctx.led_count):
+            pos_hue = (base_hue + int((i * span) / denom)) & 0xFF
+            r, g, b = self._hsv_to_rgb(pos_hue, sat, val)
+            pixels.append(
+                (
+                    max(0, min(255, int(r * brightness))),
+                    max(0, min(255, int(g * brightness))),
+                    max(0, min(255, int(b * brightness))),
+                )
+            )
+        return pixels
+
+    def _compute_base_hue(self, blend_ms: int) -> int:
         if not self._transitioning:
-            return self._active_hue
+            return self._active_base_hue
         t = max(0.0, min(1.0, self._phase_ms / float(max(1, blend_ms))))
-        diff = self._target_hue - self._active_hue
-        return int((self._active_hue + diff * t)) & 0xFF
+        diff = self._target_base_hue - self._active_base_hue
+        return int((self._active_base_hue + diff * t)) & 0xFF
 
     @staticmethod
     def _hsv_to_rgb(h: int, s: int, v: int) -> Tuple[int, int, int]:
