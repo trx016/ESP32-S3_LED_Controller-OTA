@@ -61,6 +61,7 @@ class EmberEffect : public IEffect {
     heatBuffer_.assign(count, 0);
     prevHeatBuffer_.assign(count, 0);
     frameCount_ = 0;
+    simulationCarry_ = 0.0f;
   }
 
   void render(const EffectContext &ctx, CRGB *leds, uint16_t count) override {
@@ -72,49 +73,23 @@ class EmberEffect : public IEffect {
     }
     std::fill(heatBuffer_.begin(), heatBuffer_.end(), 0);
 
-    const float speedScale = std::max(0.25f, std::min(3.0f, static_cast<float>(ctx.state.speed) / 100.0f));
+    const float speedScale = std::max(0.20f, std::min(3.0f, static_cast<float>(ctx.state.speed) / 128.0f));
+
+    const int32_t dtMs = std::max<int32_t>(1, ctx.deltaMs > 0 ? static_cast<int32_t>(ctx.deltaMs) : 33);
+    const float stepUnits = (static_cast<float>(dtMs) / 16.667f) * speedScale;
+    simulationCarry_ += stepUnits;
+
+    int simSteps = static_cast<int>(floorf(simulationCarry_));
+    simSteps = std::max(1, std::min(6, simSteps));
+    simulationCarry_ = std::max(0.0f, simulationCarry_ - static_cast<float>(simSteps));
 
     const int requestedParticles = static_cast<int>(settings_.seeds);
     const int largeStripCap = std::max(96, static_cast<int>(count) / 6);
     const int targetParticles = std::max(1, std::min(largeStripCap, requestedParticles));
-    const int baseSpawnEvery = std::max(1, static_cast<int>(roundf(10.0f - (settings_.delay / 12.0f))));
-    const int spawnEvery = std::max(1, static_cast<int>(roundf(baseSpawnEvery / std::max(0.35f, speedScale))));
 
-    if ((frameCount_ % static_cast<uint32_t>(spawnEvery)) == 0) {
-      const int deficit = std::max(0, targetParticles - static_cast<int>(particles_.size()));
-      const int spawnBatch = std::min(12, std::max(1, 1 + (deficit / 20)));
-      for (int i = 0; i < spawnBatch; ++i) {
-        spawnParticle(count, targetParticles, false);
-      }
+    for (int step = 0; step < simSteps; ++step) {
+      stepSimulation(speedScale, count, targetParticles);
     }
-
-    std::vector<EmberParticle> updated;
-    updated.reserve(particles_.size());
-    for (auto &p : particles_) {
-      if (updateParticle(p, speedScale, count)) {
-        updated.push_back(p);
-      }
-    }
-    particles_.swap(updated);
-
-    // Refill immediately after die-off instead of waiting for the next spawn tick.
-    if (static_cast<int>(particles_.size()) < targetParticles) {
-      const int deficit = targetParticles - static_cast<int>(particles_.size());
-      const int refillCount = std::min(18, std::max(1, deficit));
-      for (int i = 0; i < refillCount; ++i) {
-        spawnParticle(count, targetParticles, true);
-      }
-    }
-
-    if (static_cast<int>(particles_.size()) > targetParticles) {
-      std::sort(particles_.begin(), particles_.end(), [](const EmberParticle &a, const EmberParticle &b) {
-        return a.heat > b.heat;
-      });
-      particles_.resize(targetParticles);
-    }
-
-    cohereParticles(speedScale, count, targetParticles);
-    refillLargestGap(speedScale, count, targetParticles);
 
     for (const auto &p : particles_) {
       addGlow(heatBuffer_, p, count);
@@ -323,9 +298,53 @@ class EmberEffect : public IEffect {
 
   Settings settings_;
   uint32_t frameCount_ = 0;
+  float simulationCarry_ = 0.0f;
   std::vector<EmberParticle> particles_;
   std::vector<uint8_t> heatBuffer_;
   std::vector<uint8_t> prevHeatBuffer_;
+
+  void stepSimulation(float speedScale, uint16_t count, int targetParticles) {
+    const int baseSpawnEvery = std::max(1, static_cast<int>(roundf(10.0f - (settings_.delay / 12.0f))));
+    const int spawnEvery = std::max(1, static_cast<int>(roundf(baseSpawnEvery / std::max(0.35f, speedScale))));
+
+    if ((frameCount_ % static_cast<uint32_t>(spawnEvery)) == 0) {
+      const int deficit = std::max(0, targetParticles - static_cast<int>(particles_.size()));
+      const int spawnBatch = std::min(12, std::max(1, 1 + (deficit / 20)));
+      for (int i = 0; i < spawnBatch; ++i) {
+        spawnParticle(count, targetParticles, false);
+      }
+    }
+
+    std::vector<EmberParticle> updated;
+    updated.reserve(particles_.size());
+    for (auto &p : particles_) {
+      if (updateParticle(p, speedScale, count)) {
+        updated.push_back(p);
+      }
+    }
+    particles_.swap(updated);
+
+    // Refill immediately after die-off instead of waiting for the next spawn tick.
+    if (static_cast<int>(particles_.size()) < targetParticles) {
+      const int deficit = targetParticles - static_cast<int>(particles_.size());
+      const int refillCount = std::min(18, std::max(1, deficit));
+      for (int i = 0; i < refillCount; ++i) {
+        spawnParticle(count, targetParticles, true);
+      }
+    }
+
+    if (static_cast<int>(particles_.size()) > targetParticles) {
+      std::sort(particles_.begin(), particles_.end(), [](const EmberParticle &a, const EmberParticle &b) {
+        return a.heat > b.heat;
+      });
+      particles_.resize(targetParticles);
+    }
+
+    cohereParticles(speedScale, count, targetParticles);
+    refillLargestGap(speedScale, count, targetParticles);
+
+    ++frameCount_;
+  }
 
   float wrapCenter(float value, uint16_t count) const {
     if (count == 0) {
